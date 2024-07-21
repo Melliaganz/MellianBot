@@ -1,8 +1,8 @@
-require('dotenv').config();
 const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
 const { DisTube } = require('distube');
 const { YtDlpPlugin } = require('@distube/yt-dlp');
 const axios = require('axios');
+require('dotenv').config();
 
 const client = new Client({
   intents: [
