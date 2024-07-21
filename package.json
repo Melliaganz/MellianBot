@@ -1,0 +1,30 @@
+{
+  "name": "mellianbot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@discordjs/opus": "^0.9.0",
+    "@discordjs/voice": "^0.17.0",
+    "@distube/soundcloud": "^2.0.3",
+    "@distube/spotify": "^2.0.2",
+    "@distube/yt-dlp": "^2.0.1",
+    "axios": "^1.7.2",
+    "discord-player": "^6.7.0",
+    "discord.js": "^14.15.3",
+    "distube": "^5.0.2",
+    "dotenv": "^16.4.5",
+    "ffmpeg": "^0.0.4",
+    "ffmpeg-static": "^5.2.0",
+    "play-dl": "^1.9.7",
+    "soundcloud-downloader": "^1.0.0",
+    "spotify-web-api-node": "^5.0.2",
+    "ytdl-core": "^4.11.5"
+  }
+}
