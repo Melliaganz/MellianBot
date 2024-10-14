@@ -1,5 +1,6 @@
 package com.MellianBot;
 
+import com.google.api.client.http.javanet.NetHttpTransport;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.entities.GuildVoiceState;
@@ -20,11 +21,15 @@ import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.gson.GsonFactory;
 import com.google.api.services.youtube.YouTube;
 import com.MellianBot.YouTubeSearcher;
+import com.MellianBot.MusicManager;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Properties;
 
 public class Main extends ListenerAdapter {
     private final AudioPlayerManager playerManager;
     private final MusicManager musicManager;
-    private static final HttpTransport HTTP_TRANSPORT = ...; // Initialize as per your requirement
+    private static final HttpTransport HTTP_TRANSPORT = new NetHttpTransport();
     private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
 
     public Main() {
@@ -35,7 +40,23 @@ public class Main extends ListenerAdapter {
     }
 
     public static void main(String[] args) throws Exception {
-        JDABuilder builder = JDABuilder.createDefault("YOUR_BOT_TOKEN",
+        // Load API keys from config.properties
+        Properties properties = new Properties();
+        try (InputStream input = Main.class.getClassLoader().getResourceAsStream("config.properties")) {
+            if (input == null) {
+                System.out.println("Sorry, unable to find config.properties");
+                return;
+            }
+            // Load properties file
+            properties.load(input);
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+
+        // Get the Discord bot token from properties
+        String discordToken = properties.getProperty("discord.api.key");
+
+        JDABuilder builder = JDABuilder.createDefault(discordToken,
                 GatewayIntent.GUILD_MESSAGES,
                 GatewayIntent.MESSAGE_CONTENT,
                 GatewayIntent.GUILD_VOICE_STATES);
