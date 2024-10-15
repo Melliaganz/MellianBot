@@ -1,7 +1,6 @@
 package com.MellianBot;
 
 import com.google.api.client.http.javanet.NetHttpTransport;
-import com.google.gson.JsonObject;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.entities.GuildVoiceState;

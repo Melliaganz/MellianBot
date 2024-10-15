@@ -10,8 +10,6 @@ import java.io.InputStream;
 import java.util.List;
 import java.util.Properties;
 
-import com.MellianBot.MusicManager;
-
 public class YouTubeSearcher {
     private final YouTube youTube;
 
