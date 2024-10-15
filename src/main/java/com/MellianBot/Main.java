@@ -29,7 +29,7 @@ import java.util.Map;
 
 public class Main extends ListenerAdapter {
     private final AudioPlayerManager playerManager;
-    private final com.MellianBot.MusicManager musicManager;
+    private final MusicManager musicManager;
     private static final HttpTransport HTTP_TRANSPORT = new NetHttpTransport();
     private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
 
@@ -37,7 +37,7 @@ public class Main extends ListenerAdapter {
         this.playerManager = new DefaultAudioPlayerManager();
         AudioSourceManagers.registerRemoteSources(playerManager);
         AudioSourceManagers.registerLocalSource(playerManager);
-        this.musicManager = new com.MellianBot.MusicManager(playerManager);
+        this.musicManager = new MusicManager(playerManager);
     }
 
     public static void main(String[] args) throws Exception {
@@ -85,6 +85,9 @@ public class Main extends ListenerAdapter {
             if (channelUnion instanceof VoiceChannel) {
                 VoiceChannel channel = (VoiceChannel) channelUnion;
                 event.getGuild().getAudioManager().openAudioConnection(channel);
+
+                // Attach the AudioPlayerSendHandler to the AudioManager
+                event.getGuild().getAudioManager().setSendingHandler(new AudioPlayerSendHandler(musicManager.getPlayer()));
 
                 // Récupérer le flux audio et le titre via yt-dlp
                 String[] streamData = getYoutubeStreamUrlAndTitle(url);
@@ -136,9 +139,6 @@ public class Main extends ListenerAdapter {
         }
     }
 
-    /**
-     * Méthode pour exécuter yt-dlp et récupérer l'URL du flux audio ainsi que le titre.
-     */
     private String[] getYoutubeStreamUrlAndTitle(String videoUrl) {
         try {
             // Utilisation de yt-dlp pour récupérer l'URL du flux audio
@@ -176,17 +176,5 @@ public class Main extends ListenerAdapter {
     }
 
 
-    /**
-     * Extraire l'URL du flux audio à partir du JSON retourné par yt-dlp.
-     */
-    private String extractStreamUrlFromJson(String jsonString) {
-        JSONObject jsonObject = new JSONObject(jsonString); // Utilise org.json.JSONObject
-        return jsonObject.getString("url"); // Récupérer l'URL du flux
-    }
-
-    private String extractTitleFromJson(String jsonString) {
-        JSONObject jsonObject = new JSONObject(jsonString); // Utilise org.json.JSONObject
-        return jsonObject.getString("title"); // Récupérer le titre
-    }
-
+    // The remaining methods (getYoutubeStreamUrlAndTitle, etc.) stay the same
 }
