@@ -1,6 +1,16 @@
 package com.MellianBot;
 
+import com.google.api.client.http.HttpTransport;
 import com.google.api.client.http.javanet.NetHttpTransport;
+import com.google.api.client.json.JsonFactory;
+import com.google.api.client.json.gson.GsonFactory;
+import com.sedmelluq.discord.lavaplayer.player.AudioLoadResultHandler;
+import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager;
+import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager;
+import com.sedmelluq.discord.lavaplayer.source.AudioSourceManagers;
+import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
+import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
+import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.entities.GuildVoiceState;
@@ -9,23 +19,13 @@ import net.dv8tion.jda.api.entities.channel.unions.AudioChannelUnion;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.requests.GatewayIntent;
-import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager;
-import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager;
-import com.sedmelluq.discord.lavaplayer.source.AudioSourceManagers;
-import com.sedmelluq.discord.lavaplayer.player.AudioLoadResultHandler;
-import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
-import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
-import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
-import com.google.api.client.http.HttpTransport;
-import com.google.api.client.json.JsonFactory;
-import com.google.api.client.json.gson.GsonFactory;
-import org.json.JSONObject;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.util.Properties;
 import java.util.Map;
+import java.util.Properties;
 
 public class Main extends ListenerAdapter {
     private final AudioPlayerManager playerManager;
@@ -88,6 +88,7 @@ public class Main extends ListenerAdapter {
 
                 // Attach the AudioPlayerSendHandler to the AudioManager
                 event.getGuild().getAudioManager().setSendingHandler(new AudioPlayerSendHandler(musicManager.getPlayer()));
+                musicManager.getPlayer().addListener(new TrackScheduler(musicManager.getPlayer(), event.getGuild()));
 
                 // Récupérer le flux audio et le titre via yt-dlp
                 String[] streamData = getYoutubeStreamUrlAndTitle(url);
@@ -106,7 +107,7 @@ public class Main extends ListenerAdapter {
 
                         @Override
                         public void playlistLoaded(AudioPlaylist playlist) {
-                            event.getChannel().sendMessage("Playlist détectée.").queue();
+                            event.getChannel().sendMessage("Playlist détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
                             for (AudioTrack track : playlist.getTracks()) {
                                 musicManager.getPlayer().playTrack(track);
                             }
@@ -139,6 +140,9 @@ public class Main extends ListenerAdapter {
         }
     }
 
+    /**
+     * Méthode pour exécuter yt-dlp et récupérer l'URL du flux audio ainsi que le titre.
+     */
     private String[] getYoutubeStreamUrlAndTitle(String videoUrl) {
         try {
             // Utilisation de yt-dlp pour récupérer l'URL du flux audio
@@ -174,7 +178,4 @@ public class Main extends ListenerAdapter {
         }
         return null;
     }
-
-
-    // The remaining methods (getYoutubeStreamUrlAndTitle, etc.) stay the same
 }
