@@ -2,24 +2,22 @@ package com.MellianBot;
 
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayer;
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager;
-import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 
 public class MusicManager {
     private final AudioPlayer player;
+    private final TrackScheduler scheduler;
 
-    public MusicManager(AudioPlayerManager playerManager) {
-        this.player = playerManager.createPlayer();
+    public MusicManager(AudioPlayerManager manager) {
+        this.player = manager.createPlayer();
+        this.scheduler = new TrackScheduler(player, null);  // Le guild sera défini plus tard dans Main.java
+        this.player.addListener(scheduler);
     }
 
     public AudioPlayer getPlayer() {
         return player;
     }
 
-    public void playTrack(AudioTrack track) {
-        player.playTrack(track);
-    }
-
-    public void stopTrack() {
-        player.stopTrack();
+    public TrackScheduler getScheduler() {
+        return scheduler;
     }
 }

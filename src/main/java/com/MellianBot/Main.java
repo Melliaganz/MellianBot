@@ -4,6 +4,7 @@ import com.google.api.client.http.HttpTransport;
 import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.gson.GsonFactory;
+import com.google.api.services.youtube.YouTube;
 import com.sedmelluq.discord.lavaplayer.player.AudioLoadResultHandler;
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager;
 import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager;
@@ -26,18 +27,25 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.BlockingQueue;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 public class Main extends ListenerAdapter {
     private final AudioPlayerManager playerManager;
     private final MusicManager musicManager;
     private static final HttpTransport HTTP_TRANSPORT = new NetHttpTransport();
     private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
+    private final YouTube youTubeService;
 
     public Main() {
         this.playerManager = new DefaultAudioPlayerManager();
         AudioSourceManagers.registerRemoteSources(playerManager);
         AudioSourceManagers.registerLocalSource(playerManager);
         this.musicManager = new MusicManager(playerManager);
+        this.youTubeService = new YouTube.Builder(HTTP_TRANSPORT, JSON_FACTORY, null)
+                .setApplicationName("MellianBot")
+                .build();
     }
 
     public static void main(String[] args) throws Exception {
@@ -62,7 +70,7 @@ public class Main extends ListenerAdapter {
                 GatewayIntent.MESSAGE_CONTENT,
                 GatewayIntent.GUILD_VOICE_STATES);
 
-        builder.setActivity(Activity.playing("de la musique"));
+        builder.setActivity(Activity.watching("un bon gros boulard"));
         builder.addEventListeners(new Main());
         builder.build();
     }
@@ -78,7 +86,7 @@ public class Main extends ListenerAdapter {
                 return;
             }
 
-            String url = parts[1]; // Get URL after command
+            String url = parts[1];  // Get URL after command
             GuildVoiceState voiceState = event.getMember().getVoiceState();
             AudioChannelUnion channelUnion = voiceState.getChannel();
 
@@ -101,15 +109,16 @@ public class Main extends ListenerAdapter {
                     playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
                         @Override
                         public void trackLoaded(AudioTrack track) {
-                            event.getChannel().sendMessage("Lecture de : " + title).queue();
-                            musicManager.getPlayer().playTrack(track);
+                            track.setUserData(title);  // Stocke le titre dans les métadonnées de la piste
+                            event.getChannel().sendMessage("Ajouté à la file d'attente : " + title).queue();
+                            musicManager.getScheduler().queue(track);  // Ajoute la piste à la file d'attente
                         }
 
                         @Override
                         public void playlistLoaded(AudioPlaylist playlist) {
                             event.getChannel().sendMessage("Playlist détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
                             for (AudioTrack track : playlist.getTracks()) {
-                                musicManager.getPlayer().playTrack(track);
+                                musicManager.getScheduler().queue(track);  // Ajoute chaque piste à la file d'attente
                             }
                         }
 
@@ -131,12 +140,31 @@ public class Main extends ListenerAdapter {
             }
         }
 
+        // Gestion de la commande !queue
+        if (message.equals("!queue")) {
+            BlockingQueue<AudioTrack> queue = musicManager.getScheduler().getQueue();
+            if (queue.isEmpty()) {
+                event.getChannel().sendMessage("La file d'attente est vide.").queue();
+            } else {
+                StringBuilder queueList = new StringBuilder("Pistes en attente :\n");
+                for (AudioTrack track : queue) {
+                    String trackTitle = (String) track.getUserData();  // Récupère le titre depuis les métadonnées
+                    if (trackTitle == null) {
+                        trackTitle = "Titre inconnu (" + track.getInfo().uri + ")";
+                    }
+                    queueList.append(trackTitle).append("\n");
+                }
+                event.getChannel().sendMessage(queueList.toString()).queue();
+            }
+        }
+
         if (message.equals("!pause")) {
             musicManager.getPlayer().setPaused(true);
         }
 
         if (message.equals("!skip")) {
-            musicManager.getPlayer().stopTrack();
+            musicManager.getScheduler().nextTrack();  // Passe à la piste suivante
+            event.getChannel().sendMessage("Piste suivante !").queue();
         }
     }
 
@@ -175,6 +203,17 @@ public class Main extends ListenerAdapter {
             }
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
+        }
+        return null;
+    }
+
+    // Méthode utilitaire pour extraire l'ID vidéo de l'URL YouTube
+    public String extractYoutubeVideoId(String url) {
+        String pattern = "(?<=watch\\?v=|youtu.be\\/)[^&]+";
+        Pattern compiledPattern = Pattern.compile(pattern);
+        Matcher matcher = compiledPattern.matcher(url);
+        if (matcher.find()) {
+            return matcher.group();  // Retourne l'ID de la vidéo
         }
         return null;
     }
