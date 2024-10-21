@@ -44,6 +44,7 @@ public class Main extends ListenerAdapter {
         this.playerManager = new DefaultAudioPlayerManager();
         AudioSourceManagers.registerRemoteSources(playerManager);
         AudioSourceManagers.registerLocalSource(playerManager);
+        // SpotifyAudioSourceManager removed due to missing dependency
         this.youTubeService = new YouTube.Builder(HTTP_TRANSPORT, JSON_FACTORY, null)
                 .setApplicationName("MellianBot")
                 .build();
@@ -117,40 +118,32 @@ public class Main extends ListenerAdapter {
                 }
 
                 // Charger la musique à partir de l'URL
-                String[] streamData = getYoutubeStreamUrlAndTitle(url);
-                if (streamData != null) {
-                    String streamUrl = streamData[0];
-                    String title = streamData[1];
+                playerManager.loadItem(url, new AudioLoadResultHandler() {
+                    @Override
+                    public void trackLoaded(AudioTrack track) {
+                        track.setUserData(track.getInfo().title);  // Stocke le titre dans les métadonnées de la piste
+                        event.getChannel().sendMessage("Ajouté à la file d'attente : " + track.getInfo().title).queue();
+                        musicManager.getScheduler().queue(track);  // Ajoute la piste à la file d'attente
+                    }
 
-                    playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
-                        @Override
-                        public void trackLoaded(AudioTrack track) {
-                            track.setUserData(title);  // Stocke le titre dans les métadonnées de la piste
-                            event.getChannel().sendMessage("Ajouté à la file d'attente : " + title).queue();
-                            musicManager.getScheduler().queue(track);  // Ajoute la piste à la file d'attente
+                    @Override
+                    public void playlistLoaded(AudioPlaylist playlist) {
+                        event.getChannel().sendMessage("Playlist détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
+                        for (AudioTrack track : playlist.getTracks()) {
+                            musicManager.getScheduler().queue(track);  // Ajoute chaque piste à la file d'attente
                         }
+                    }
 
-                        @Override
-                        public void playlistLoaded(AudioPlaylist playlist) {
-                            event.getChannel().sendMessage("Playlist détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
-                            for (AudioTrack track : playlist.getTracks()) {
-                                musicManager.getScheduler().queue(track);  // Ajoute chaque piste à la file d'attente
-                            }
-                        }
+                    @Override
+                    public void noMatches() {
+                        event.getChannel().sendMessage("Impossible de trouver cette piste.").queue();
+                    }
 
-                        @Override
-                        public void noMatches() {
-                            event.getChannel().sendMessage("Impossible de trouver cette piste.").queue();
-                        }
-
-                        @Override
-                        public void loadFailed(FriendlyException exception) {
-                            event.getChannel().sendMessage("Erreur lors du chargement de la piste.").queue();
-                        }
-                    });
-                } else {
-                    event.getChannel().sendMessage("Erreur lors de la récupération du flux audio avec yt-dlp.").queue();
-                }
+                    @Override
+                    public void loadFailed(FriendlyException exception) {
+                        event.getChannel().sendMessage("Erreur lors du chargement de la piste.").queue();
+                    }
+                });
             } else {
                 event.getChannel().sendMessage("Vous devez être dans un canal vocal pour jouer de la musique !").queue();
             }
