@@ -162,10 +162,17 @@ public class Main extends ListenerAdapter {
             musicManager.getPlayer().setPaused(true);
         }
 
-        if (message.equals("!skip")) {
-            musicManager.getScheduler().nextTrack();  // Passe à la piste suivante
-            event.getChannel().sendMessage("Piste suivante !").queue();
+        if (message.startsWith("!skip")) {
+            TrackScheduler scheduler = musicManager.getScheduler();
+
+            if (musicManager.getPlayer().getPlayingTrack() != null) {
+                scheduler.skipTrack();  // Sauter la piste actuelle
+                event.getChannel().sendMessage("Piste sautée ! Lecture de la piste suivante.").queue();
+            } else {
+                event.getChannel().sendMessage("Aucune piste en cours de lecture !").queue();
+            }
         }
+
     }
 
     /**
