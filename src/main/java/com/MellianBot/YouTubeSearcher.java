@@ -14,24 +14,21 @@ import java.util.Properties;
 public class YouTubeSearcher {
     private final YouTube youTube;
 
-    // Constructor accepting YouTube service
     public YouTubeSearcher(YouTube youTube) {
         this.youTube = youTube;
     }
 
-    // Méthode pour rechercher une vidéo via une requête (ex: un titre de chanson)
     public String searchYoutube(String query, MusicManager musicManager, MessageChannelUnion channel) {
         String youtubeApiKey = getYoutubeApiKey();
         if (youtubeApiKey == null) return null;
 
         try {
-            // Création de la requête pour rechercher des vidéos
             YouTube.Search.List request = youTube.search().list("id,snippet");
             request.setQ(query);
             request.setType("video");
             request.setFields("items(id/videoId,snippet/title)");
-            request.setKey(youtubeApiKey);  // Utiliser la clé YouTube API
-            request.setMaxResults(1L);  // Limite à 1 résultat
+            request.setKey(youtubeApiKey);
+            request.setMaxResults(1L);
 
             SearchListResponse response = request.execute();
             List<SearchResult> results = response.getItems();
@@ -51,21 +48,17 @@ public class YouTubeSearcher {
         }
     }
 
-    // Méthode pour obtenir le titre d'une vidéo via son ID
     public String getTitleByVideoId(String videoId) {
         String youtubeApiKey = getYoutubeApiKey();
         if (youtubeApiKey == null) return null;
 
         try {
-            // Création de la requête pour obtenir des informations sur la vidéo via son ID
             YouTube.Videos.List request = youTube.videos().list("snippet");
-            request.setId(videoId);  // Ajout de l'ID de la vidéo pour filtrer la requête
-            request.setKey(youtubeApiKey);  // Utilisation de la clé YouTube API
+            request.setId(videoId);
+            request.setKey(youtubeApiKey);
 
-            // Exécuter la requête
             VideoListResponse response = request.execute();
             if (!response.getItems().isEmpty()) {
-                // Récupérer et retourner le titre de la vidéo
                 return response.getItems().get(0).getSnippet().getTitle();
             } else {
                 System.out.println("Aucune vidéo trouvée pour l'ID donné.");
@@ -80,7 +73,6 @@ public class YouTubeSearcher {
 
 
 
-    // Méthode pour obtenir la clé API YouTube à partir du fichier de configuration
     private String getYoutubeApiKey() {
         Properties properties = new Properties();
         try (InputStream input = YouTubeSearcher.class.getClassLoader().getResourceAsStream("config.properties")) {

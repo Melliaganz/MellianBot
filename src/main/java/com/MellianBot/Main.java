@@ -1,3 +1,4 @@
+// Main.java
 package com.MellianBot;
 
 import com.google.api.client.http.HttpTransport;
@@ -28,24 +29,26 @@ import java.io.InputStreamReader;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.BlockingQueue;
-import java.util.regex.Pattern;
 import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class Main extends ListenerAdapter {
     private final AudioPlayerManager playerManager;
-    private final MusicManager musicManager;
+    private MusicManager musicManager;
     private static final HttpTransport HTTP_TRANSPORT = new NetHttpTransport();
     private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
     private final YouTube youTubeService;
+    private final YouTubeSearcher youTubeSearcher;
 
     public Main() {
         this.playerManager = new DefaultAudioPlayerManager();
         AudioSourceManagers.registerRemoteSources(playerManager);
         AudioSourceManagers.registerLocalSource(playerManager);
-        this.musicManager = new MusicManager(playerManager);
         this.youTubeService = new YouTube.Builder(HTTP_TRANSPORT, JSON_FACTORY, null)
                 .setApplicationName("MellianBot")
                 .build();
+
+        this.youTubeSearcher = new YouTubeSearcher(youTubeService);
     }
 
     public static void main(String[] args) throws Exception {
@@ -70,7 +73,7 @@ public class Main extends ListenerAdapter {
                 GatewayIntent.MESSAGE_CONTENT,
                 GatewayIntent.GUILD_VOICE_STATES);
 
-        builder.setActivity(Activity.watching("un bon gros boulard"));
+        builder.setActivity(Activity.listening("de la musique avec !play"));
         builder.addEventListeners(new Main());
         builder.build();
     }
@@ -80,13 +83,13 @@ public class Main extends ListenerAdapter {
         String message = event.getMessage().getContentRaw();
 
         if (message.startsWith("!play")) {
-            String[] parts = message.split(" ");
+            String[] parts = message.split(" ", 2);
             if (parts.length < 2) {
-                event.getChannel().sendMessage("Vous devez fournir une URL après la commande !play.").queue();
+                event.getChannel().sendMessage("Vous devez fournir un lien ou des mots-clés après la commande !play.").queue();
                 return;
             }
 
-            String url = parts[1];  // Get URL after command
+            String input = parts[1];  // Obtenir l'entrée après la commande !play
             GuildVoiceState voiceState = event.getMember().getVoiceState();
             AudioChannelUnion channelUnion = voiceState.getChannel();
 
@@ -94,18 +97,31 @@ public class Main extends ListenerAdapter {
                 VoiceChannel channel = (VoiceChannel) channelUnion;
                 event.getGuild().getAudioManager().openAudioConnection(channel);
 
+                // Initialiser MusicManager avec JDA et Guild
+                if (musicManager == null) {
+                    musicManager = new MusicManager(playerManager, event.getGuild(), event.getJDA());
+                }
+
                 // Attach the AudioPlayerSendHandler to the AudioManager
                 event.getGuild().getAudioManager().setSendingHandler(new AudioPlayerSendHandler(musicManager.getPlayer()));
-                musicManager.getPlayer().addListener(new TrackScheduler(musicManager.getPlayer(), event.getGuild()));
 
-                // Récupérer le flux audio et le titre via yt-dlp
+                String url = input;
+                // Vérifier si l'entrée n'est pas une URL (utiliser un simple regex pour détecter les liens YouTube)
+                if (!input.startsWith("http://") && !input.startsWith("https://")) {
+                    // Recherche sur YouTube avec les mots-clés fournis
+                    url = youTubeSearcher.searchYoutube(input, musicManager, event.getChannel());
+                    if (url == null) {
+                        // Si aucun résultat n'a été trouvé ou une erreur s'est produite, arrêter ici
+                        return;
+                    }
+                }
+
+                // Charger la musique à partir de l'URL
                 String[] streamData = getYoutubeStreamUrlAndTitle(url);
-
                 if (streamData != null) {
                     String streamUrl = streamData[0];
                     String title = streamData[1];
 
-                    // Charger le flux récupéré avec Lavaplayer
                     playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
                         @Override
                         public void trackLoaded(AudioTrack track) {
@@ -155,6 +171,17 @@ public class Main extends ListenerAdapter {
                     queueList.append(trackTitle).append("\n");
                 }
                 event.getChannel().sendMessage(queueList.toString()).queue();
+            }
+        }
+
+        // Gestion de la commande !playing
+        if (message.equals("!current")) {
+            AudioTrack currentTrack = musicManager.getScheduler().getCurrentTrack();
+            if (currentTrack != null) {
+                String trackTitle = (String) currentTrack.getUserData();
+                event.getChannel().sendMessage("En cours de lecture : " + trackTitle).queue();
+            } else {
+                event.getChannel().sendMessage("Aucune musique n'est en cours de lecture.").queue();
             }
         }
 
