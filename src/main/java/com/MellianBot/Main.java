@@ -1,6 +1,6 @@
-// Main.java
 package com.MellianBot;
 
+import com.github.topi314.lavasrc.spotify.SpotifySourceManager;
 import com.google.api.client.http.HttpTransport;
 import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.JsonFactory;
@@ -37,14 +37,45 @@ public class Main extends ListenerAdapter {
     private MusicManager musicManager;
     private static final HttpTransport HTTP_TRANSPORT = new NetHttpTransport();
     private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
-    private final YouTube youTubeService;
-    private final YouTubeSearcher youTubeSearcher;
+    private YouTube youTubeService;
+    private YouTubeSearcher youTubeSearcher;
+    private String spotifyClientId;
+    private String spotifyClientSecret;
 
     public Main() {
         this.playerManager = new DefaultAudioPlayerManager();
+
+        // Charger les clés API Spotify depuis config.properties
+        Properties properties = new Properties();
+        try (InputStream input = Main.class.getClassLoader().getResourceAsStream("config.properties")) {
+            if (input == null) {
+                System.out.println("Désolé, impossible de trouver config.properties");
+                return;
+            }
+            properties.load(input);
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+
+        this.spotifyClientId = properties.getProperty("spotify.client.id");
+        this.spotifyClientSecret = properties.getProperty("spotify.client.secret");
+
+        // Initialiser le gestionnaire Spotify avec les clés chargées
+        SpotifySourceManager spotifySourceManager = new SpotifySourceManager(
+                new String[]{"user-read-email", "playlist-read-private", "streaming"},
+                spotifyClientId,
+                spotifyClientSecret,
+                null,  // URI de redirection si nécessaire
+                playerManager
+        );
+
+        // Enregistrement du gestionnaire Spotify
+        playerManager.registerSourceManager(spotifySourceManager);
+
+        // Enregistrement des autres sources audio
         AudioSourceManagers.registerRemoteSources(playerManager);
         AudioSourceManagers.registerLocalSource(playerManager);
-        // SpotifyAudioSourceManager removed due to missing dependency
+
         this.youTubeService = new YouTube.Builder(HTTP_TRANSPORT, JSON_FACTORY, null)
                 .setApplicationName("MellianBot")
                 .build();
@@ -53,20 +84,19 @@ public class Main extends ListenerAdapter {
     }
 
     public static void main(String[] args) throws Exception {
-        // Load API keys from config.properties
+        // Charger les clés API à partir de config.properties
         Properties properties = new Properties();
         try (InputStream input = Main.class.getClassLoader().getResourceAsStream("config.properties")) {
             if (input == null) {
-                System.out.println("Sorry, unable to find config.properties");
+                System.out.println("Désolé, impossible de trouver config.properties");
                 return;
             }
-            // Load properties file
             properties.load(input);
         } catch (IOException ex) {
             ex.printStackTrace();
         }
 
-        // Get the Discord bot token from properties
+        // Obtenir le token du bot Discord depuis les propriétés
         String discordToken = properties.getProperty("discord.api.key");
 
         JDABuilder builder = JDABuilder.createDefault(discordToken,
@@ -103,53 +133,130 @@ public class Main extends ListenerAdapter {
                     musicManager = new MusicManager(playerManager, event.getGuild(), event.getJDA());
                 }
 
-                // Attach the AudioPlayerSendHandler to the AudioManager
+                // Attacher l'AudioPlayerSendHandler à l'AudioManager
                 event.getGuild().getAudioManager().setSendingHandler(new AudioPlayerSendHandler(musicManager.getPlayer()));
 
-                String url = input;
-                // Vérifier si l'entrée n'est pas une URL (utiliser un simple regex pour détecter les liens YouTube)
-                if (!input.startsWith("http://") && !input.startsWith("https://")) {
-                    // Recherche sur YouTube avec les mots-clés fournis
-                    url = youTubeSearcher.searchYoutube(input, musicManager, event.getChannel());
-                    if (url == null) {
-                        // Si aucun résultat n'a été trouvé ou une erreur s'est produite, arrêter ici
-                        return;
-                    }
+                // Vérifier si c'est un lien Spotify
+                if (input.startsWith("https://open.spotify.com/")) {
+                    System.out.println("Traitement du lien Spotify avec lavasrc : " + input);
+
+                    // Charger directement l'élément Spotify
+                    playerManager.loadItem(input, new AudioLoadResultHandler() {
+                        @Override
+                        public void trackLoaded(AudioTrack track) {
+                            track.setUserData(track.getInfo().title);
+                            event.getChannel().sendMessage("Ajouté à la file d'attente (Spotify) : " + track.getInfo().title).queue();
+                            musicManager.getScheduler().queue(track);
+                        }
+
+                        @Override
+                        public void playlistLoaded(AudioPlaylist playlist) {
+                            event.getChannel().sendMessage("Playlist Spotify détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
+                            for (AudioTrack track : playlist.getTracks()) {
+                                musicManager.getScheduler().queue(track);
+                            }
+                        }
+
+                        @Override
+                        public void noMatches() {
+                            event.getChannel().sendMessage("Aucune piste trouvée sur Spotify.").queue();
+                        }
+
+                        @Override
+                        public void loadFailed(FriendlyException exception) {
+                            event.getChannel().sendMessage("Erreur lors du chargement de la piste Spotify : " + exception.getMessage()).queue();
+                            exception.printStackTrace();
+                        }
+                    });
                 }
 
-                // Charger la musique à partir de l'URL
-                playerManager.loadItem(url, new AudioLoadResultHandler() {
-                    @Override
-                    public void trackLoaded(AudioTrack track) {
-                        track.setUserData(track.getInfo().title);  // Stocke le titre dans les métadonnées de la piste
-                        event.getChannel().sendMessage("Ajouté à la file d'attente : " + track.getInfo().title).queue();
-                        musicManager.getScheduler().queue(track);  // Ajoute la piste à la file d'attente
+                // Vérifier si c'est un lien YouTube
+                else if (input.startsWith("http://") || input.startsWith("https://www.youtube.com") || input.startsWith("https://youtu.be")) {
+                    // Traiter les liens YouTube avec yt-dlp
+                    String[] streamData = getYoutubeStreamUrlAndTitle(input);
+                    if (streamData != null) {
+                        String streamUrl = streamData[0];
+                        String title = streamData[1];
+
+                        playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
+                            @Override
+                            public void trackLoaded(AudioTrack track) {
+                                track.setUserData(title);
+                                event.getChannel().sendMessage("Ajouté à la file d'attente (YouTube) : " + title).queue();
+                                musicManager.getScheduler().queue(track);
+                            }
+
+                            @Override
+                            public void playlistLoaded(AudioPlaylist playlist) {
+                                event.getChannel().sendMessage("Playlist YouTube détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
+                                for (AudioTrack track : playlist.getTracks()) {
+                                    musicManager.getScheduler().queue(track);
+                                }
+                            }
+
+                            @Override
+                            public void noMatches() {
+                                event.getChannel().sendMessage("Aucune piste trouvée sur YouTube.").queue();
+                            }
+
+                            @Override
+                            public void loadFailed(FriendlyException exception) {
+                                event.getChannel().sendMessage("Erreur lors du chargement de la piste YouTube.").queue();
+                            }
+                        });
+                    } else {
+                        event.getChannel().sendMessage("Erreur lors de la récupération du flux audio avec yt-dlp.").queue();
+                    }
+                } else {
+                    // Recherche sur YouTube avec des mots-clés
+                    String url = youTubeSearcher.searchYoutube(input, musicManager, event.getChannel());
+                    if (url == null) {
+                        event.getChannel().sendMessage("Aucun résultat trouvé sur YouTube.").queue();
+                        return;
                     }
 
-                    @Override
-                    public void playlistLoaded(AudioPlaylist playlist) {
-                        event.getChannel().sendMessage("Playlist détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
-                        for (AudioTrack track : playlist.getTracks()) {
-                            musicManager.getScheduler().queue(track);  // Ajoute chaque piste à la file d'attente
-                        }
-                    }
+                    // Charger la musique YouTube trouvée
+                    String[] streamData = getYoutubeStreamUrlAndTitle(url);
+                    if (streamData != null) {
+                        String streamUrl = streamData[0];
+                        String title = streamData[1];
 
-                    @Override
-                    public void noMatches() {
-                        event.getChannel().sendMessage("Impossible de trouver cette piste.").queue();
-                    }
+                        playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
+                            @Override
+                            public void trackLoaded(AudioTrack track) {
+                                track.setUserData(title);
+                                event.getChannel().sendMessage("Ajouté à la file d'attente : " + title).queue();
+                                musicManager.getScheduler().queue(track);
+                            }
 
-                    @Override
-                    public void loadFailed(FriendlyException exception) {
-                        event.getChannel().sendMessage("Erreur lors du chargement de la piste.").queue();
+                            @Override
+                            public void playlistLoaded(AudioPlaylist playlist) {
+                                event.getChannel().sendMessage("Playlist YouTube détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
+                                for (AudioTrack track : playlist.getTracks()) {
+                                    musicManager.getScheduler().queue(track);
+                                }
+                            }
+
+                            @Override
+                            public void noMatches() {
+                                event.getChannel().sendMessage("Impossible de trouver cette piste sur YouTube.").queue();
+                            }
+
+                            @Override
+                            public void loadFailed(FriendlyException exception) {
+                                event.getChannel().sendMessage("Erreur lors du chargement de la piste YouTube : " + exception.getMessage()).queue();
+                                exception.printStackTrace();
+                            }
+                        });
+                    } else {
+                        event.getChannel().sendMessage("Erreur lors de la récupération du flux audio avec yt-dlp.").queue();
                     }
-                });
+                }
             } else {
                 event.getChannel().sendMessage("Vous devez être dans un canal vocal pour jouer de la musique !").queue();
             }
         }
 
-        // Gestion de la commande !queue
         if (message.equals("!queue")) {
             BlockingQueue<AudioTrack> queue = musicManager.getScheduler().getQueue();
             if (queue.isEmpty()) {
@@ -157,7 +264,7 @@ public class Main extends ListenerAdapter {
             } else {
                 StringBuilder queueList = new StringBuilder("Pistes en attente :\n");
                 for (AudioTrack track : queue) {
-                    String trackTitle = (String) track.getUserData();  // Récupère le titre depuis les métadonnées
+                    String trackTitle = (String) track.getUserData();
                     if (trackTitle == null) {
                         trackTitle = "Titre inconnu (" + track.getInfo().uri + ")";
                     }
@@ -167,7 +274,6 @@ public class Main extends ListenerAdapter {
             }
         }
 
-        // Gestion de la commande !playing
         if (message.equals("!current")) {
             AudioTrack currentTrack = musicManager.getScheduler().getCurrentTrack();
             if (currentTrack != null) {
@@ -184,46 +290,36 @@ public class Main extends ListenerAdapter {
 
         if (message.startsWith("!skip")) {
             TrackScheduler scheduler = musicManager.getScheduler();
-
             if (musicManager.getPlayer().getPlayingTrack() != null) {
-                scheduler.skipTrack();  // Sauter la piste actuelle
+                scheduler.skipTrack();
                 event.getChannel().sendMessage("Piste sautée ! Lecture de la piste suivante.").queue();
             } else {
                 event.getChannel().sendMessage("Aucune piste en cours de lecture !").queue();
             }
         }
-
     }
 
-    /**
-     * Méthode pour exécuter yt-dlp et récupérer l'URL du flux audio ainsi que le titre.
-     */
     private String[] getYoutubeStreamUrlAndTitle(String videoUrl) {
         try {
-            // Utilisation de yt-dlp pour récupérer l'URL du flux audio
             ProcessBuilder builder = new ProcessBuilder("yt-dlp", "-f", "bestaudio", "--get-url", videoUrl);
             Map<String, String> env = System.getenv();
-            String path = env.get("PATH") + ":/usr/local/bin"; // Assurez-vous que yt-dlp est accessible
+            String path = env.get("PATH") + ":/usr/local/bin";
             builder.environment().put("PATH", path);
             Process process = builder.start();
 
-            // Lire l'URL du flux audio depuis la sortie standard
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String streamUrl = reader.readLine();  // Lire la première ligne qui contient l'URL
+            String streamUrl = reader.readLine();
 
-            // Attendre la fin du processus yt-dlp
             int exitCode = process.waitFor();
             if (exitCode == 0 && streamUrl != null && !streamUrl.isEmpty()) {
-                // Récupérer le titre de la vidéo en utilisant yt-dlp
                 ProcessBuilder titleBuilder = new ProcessBuilder("yt-dlp", "--get-title", videoUrl);
                 Process titleProcess = titleBuilder.start();
                 BufferedReader titleReader = new BufferedReader(new InputStreamReader(titleProcess.getInputStream()));
-                String title = titleReader.readLine();  // Lire le titre
+                String title = titleReader.readLine();
 
-                // Attendre la fin du processus de titre
                 int titleExitCode = titleProcess.waitFor();
                 if (titleExitCode == 0 && title != null && !title.isEmpty()) {
-                    return new String[]{streamUrl, title}; // Retourner l'URL et le titre
+                    return new String[]{streamUrl, title};
                 }
             } else {
                 System.out.println("yt-dlp a échoué avec le code : " + exitCode);
@@ -234,13 +330,12 @@ public class Main extends ListenerAdapter {
         return null;
     }
 
-    // Méthode utilitaire pour extraire l'ID vidéo de l'URL YouTube
     public String extractYoutubeVideoId(String url) {
         String pattern = "(?<=watch\\?v=|youtu.be\\/)[^&]+";
         Pattern compiledPattern = Pattern.compile(pattern);
         Matcher matcher = compiledPattern.matcher(url);
         if (matcher.find()) {
-            return matcher.group();  // Retourne l'ID de la vidéo
+            return matcher.group();
         }
         return null;
     }
