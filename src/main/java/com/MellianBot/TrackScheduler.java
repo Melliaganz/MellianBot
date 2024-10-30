@@ -2,6 +2,7 @@
 package com.MellianBot;
 
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayer;
+import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import com.sedmelluq.discord.lavaplayer.player.event.AudioEventAdapter;
 import com.sedmelluq.discord.lavaplayer.player.event.TrackEndEvent;
@@ -9,6 +10,8 @@ import com.sedmelluq.discord.lavaplayer.track.AudioTrackEndReason;
 import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.JDA;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -19,6 +22,7 @@ public class TrackScheduler extends AudioEventAdapter {
     private final BlockingQueue<AudioTrack> queue;
     private JDA jda;
     private AudioTrack currentTrack;
+    private static final Logger logger = LoggerFactory.getLogger(TrackScheduler.class);
 
     public TrackScheduler(AudioPlayer player, Guild guild, JDA jda) {
         this.player = player;
@@ -36,35 +40,64 @@ public class TrackScheduler extends AudioEventAdapter {
     }
 
     public void queue(AudioTrack track) {
-        if (!player.startTrack(track, true)) {  // Essaie de démarrer la piste si aucune autre n'est en lecture
-            queue.offer(track);  // Si une piste est en cours, ajoute la nouvelle à la file d'attente
+        if (!player.startTrack(track, true)) {
+            queue.offer(track);
+            logger.info("Piste ajoutée à la file d'attente : {} | Source : {}", track.getInfo().title, track.getSourceManager().getSourceName());
         } else {
             currentTrack = track;
-            updateBotActivity(track);  // Met à jour l'activité du bot avec la piste en cours
+            updateBotActivity(track);
+            logger.info("Lecture de la piste : {}", track.getInfo().title);
         }
     }
 
+
+
     public void nextTrack() {
-        AudioTrack nextTrack = queue.poll();  // Récupère la prochaine piste de la file d'attente
+        AudioTrack nextTrack = queue.poll();
         if (nextTrack != null) {
             currentTrack = nextTrack;
-            player.startTrack(nextTrack, false);  // Charge et joue la piste suivante
-            updateBotActivity(nextTrack);  // Met à jour l'activité du bot avec la nouvelle piste
+            player.startTrack(nextTrack, false);
+            updateBotActivity(nextTrack);
+            logger.info("Lecture de la piste suivante : {}", nextTrack.getInfo().title);
         } else {
-            if (player.getPlayingTrack() == null && guild != null) {  // Vérifie que guild n'est pas null avant de tenter la déconnexion
-                guild.getAudioManager().closeAudioConnection();  // Si la file est vide et aucune piste ne joue, déconnecte le bot
-                jda.getPresence().setActivity(Activity.watching("un bon gros boulard"));  // Revenir à l'activité par défaut
+            if (player.getPlayingTrack() == null && guild != null) {
+                guild.getAudioManager().closeAudioConnection();
+                jda.getPresence().setActivity(Activity.watching("un bon gros boulard"));
+                logger.info("File d'attente vide, déconnexion du bot du canal vocal");
             }
         }
     }
 
+
+
+    @Override
+    public void onTrackStart(AudioPlayer player, AudioTrack track) {
+        System.out.println("Début de lecture de la piste : " + track.getInfo().title);
+        logger.info("Track loaded: " + track.getInfo().title);
+    }
+
     @Override
     public void onTrackEnd(AudioPlayer player, AudioTrack track, AudioTrackEndReason endReason) {
-        // Si la piste se termine naturellement, on passe à la suivante
+        logger.info("Fin de la piste : {}, raison : {}", track.getInfo().title, endReason);
+        if (endReason == AudioTrackEndReason.LOAD_FAILED) {
+            logger.error("Le chargement de la piste a échoué. Détails de la piste : titre = {}, URI = {}, source = {}",
+                    track.getInfo().title, track.getInfo().uri, track.getSourceManager().getSourceName());
+
+            // Capturer l'exception si elle est présente
+            if (track.getUserData() instanceof FriendlyException) {
+                FriendlyException exception = (FriendlyException) track.getUserData();
+                logger.error("Exception lors du chargement de la piste : {}", exception.getMessage(), exception);
+            }
+        }
+
         if (endReason.mayStartNext) {
             nextTrack();
         }
     }
+
+
+
+
 
     // Méthode pour skipper une piste
     public void skipTrack() {

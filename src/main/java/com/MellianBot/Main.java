@@ -6,9 +6,12 @@ import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.gson.GsonFactory;
 import com.google.api.services.youtube.YouTube;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.sedmelluq.discord.lavaplayer.player.AudioLoadResultHandler;
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager;
 import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager;
+import com.sedmelluq.discord.lavaplayer.source.AudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.AudioSourceManagers;
 import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
@@ -22,10 +25,13 @@ import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.*;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.Base64;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.BlockingQueue;
@@ -33,6 +39,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class Main extends ListenerAdapter {
+    private static final Logger logger = LoggerFactory.getLogger(Main.class);
     private final AudioPlayerManager playerManager;
     private MusicManager musicManager;
     private static final HttpTransport HTTP_TRANSPORT = new NetHttpTransport();
@@ -60,17 +67,28 @@ public class Main extends ListenerAdapter {
         this.spotifyClientId = properties.getProperty("spotify.client.id");
         this.spotifyClientSecret = properties.getProperty("spotify.client.secret");
 
-        // Initialiser le gestionnaire Spotify avec les clés chargées
-        SpotifySourceManager spotifySourceManager = new SpotifySourceManager(
-                new String[]{"user-read-email", "playlist-read-private", "streaming"},
-                spotifyClientId,
-                spotifyClientSecret,
-                null,  // URI de redirection si nécessaire
-                playerManager
-        );
+        // Obtenir le token d'accès Spotify
+        String spotifyAccessToken = getSpotifyAccessToken();
+        if (spotifyAccessToken == null) {
+            logger.error("Token Spotify non valide ou non obtenu.");
+        } else {
+            logger.info("Token Spotify valide, enregistrement de SpotifySourceManager.");
+        }
 
-        // Enregistrement du gestionnaire Spotify
-        playerManager.registerSourceManager(spotifySourceManager);
+        if (spotifyAccessToken != null) {
+            // Initialiser le gestionnaire Spotify avec le token d'accès
+            SpotifySourceManager spotifySourceManager = new SpotifySourceManager(
+                    new String[]{"user-read-email", "playlist-read-private", "streaming"},
+                    spotifyClientId,
+                    spotifyClientSecret,
+                    spotifyAccessToken,
+                    playerManager
+            );
+            playerManager.registerSourceManager((AudioSourceManager) spotifySourceManager);
+            System.out.println("SpotifySourceManager initialisé avec succès.");
+        } else {
+            System.out.println("Impossible d'obtenir un token d'accès Spotify.");
+        }
 
         // Enregistrement des autres sources audio
         AudioSourceManagers.registerRemoteSources(playerManager);
@@ -102,11 +120,49 @@ public class Main extends ListenerAdapter {
         JDABuilder builder = JDABuilder.createDefault(discordToken,
                 GatewayIntent.GUILD_MESSAGES,
                 GatewayIntent.MESSAGE_CONTENT,
-                GatewayIntent.GUILD_VOICE_STATES);
+                GatewayIntent.GUILD_VOICE_STATES,
+                GatewayIntent.GUILD_EMOJIS_AND_STICKERS,
+                GatewayIntent.SCHEDULED_EVENTS);
 
         builder.setActivity(Activity.listening("de la musique avec !play"));
         builder.addEventListeners(new Main());
         builder.build();
+    }
+
+    public String getSpotifyAccessToken() {
+        String auth = spotifyClientId + ":" + spotifyClientSecret;
+        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
+
+        try {
+            URL url = new URL("https://accounts.spotify.com/api/token");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Authorization", "Basic " + encodedAuth);
+            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            conn.setDoOutput(true);
+            String urlParameters = "grant_type=client_credentials";
+            try (OutputStream os = conn.getOutputStream()) {
+                byte[] input = urlParameters.getBytes("utf-8");
+                os.write(input, 0, input.length);
+            }
+
+            if (conn.getResponseCode() == 200) {
+                BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "utf-8"));
+                StringBuilder response = new StringBuilder();
+                String responseLine;
+                while ((responseLine = br.readLine()) != null) {
+                    response.append(responseLine.trim());
+                }
+
+                JsonObject jsonObject = JsonParser.parseString(response.toString()).getAsJsonObject();
+                return jsonObject.get("access_token").getAsString();
+            } else {
+                System.out.println("Erreur : Code de réponse Spotify " + conn.getResponseCode());
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return null;
     }
 
     @Override
@@ -127,6 +183,7 @@ public class Main extends ListenerAdapter {
             if (channelUnion instanceof VoiceChannel) {
                 VoiceChannel channel = (VoiceChannel) channelUnion;
                 event.getGuild().getAudioManager().openAudioConnection(channel);
+                System.out.println("Bot connecté au canal vocal : " + channel.getName());
 
                 // Initialiser MusicManager avec JDA et Guild
                 if (musicManager == null) {
@@ -135,6 +192,7 @@ public class Main extends ListenerAdapter {
 
                 // Attacher l'AudioPlayerSendHandler à l'AudioManager
                 event.getGuild().getAudioManager().setSendingHandler(new AudioPlayerSendHandler(musicManager.getPlayer()));
+                System.out.println("AudioPlayerSendHandler configuré pour le canal vocal : " + channel.getName());
 
                 // Vérifier si c'est un lien Spotify
                 if (input.startsWith("https://open.spotify.com/")) {
@@ -144,14 +202,13 @@ public class Main extends ListenerAdapter {
                     playerManager.loadItem(input, new AudioLoadResultHandler() {
                         @Override
                         public void trackLoaded(AudioTrack track) {
-                            track.setUserData(track.getInfo().title);
-                            event.getChannel().sendMessage("Ajouté à la file d'attente (Spotify) : " + track.getInfo().title).queue();
+                            logger.info("Piste Spotify chargée : {}", track.getInfo().title);
                             musicManager.getScheduler().queue(track);
                         }
 
                         @Override
                         public void playlistLoaded(AudioPlaylist playlist) {
-                            event.getChannel().sendMessage("Playlist Spotify détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
+                            logger.info("Playlist Spotify détectée : {} avec {} pistes", playlist.getName(), playlist.getTracks().size());
                             for (AudioTrack track : playlist.getTracks()) {
                                 musicManager.getScheduler().queue(track);
                             }
@@ -159,15 +216,15 @@ public class Main extends ListenerAdapter {
 
                         @Override
                         public void noMatches() {
-                            event.getChannel().sendMessage("Aucune piste trouvée sur Spotify.").queue();
+                            logger.warn("Aucune correspondance trouvée pour : {}", input);
                         }
 
                         @Override
                         public void loadFailed(FriendlyException exception) {
-                            event.getChannel().sendMessage("Erreur lors du chargement de la piste Spotify : " + exception.getMessage()).queue();
-                            exception.printStackTrace();
+                            logger.error("Erreur lors du chargement de la piste Spotify : {}", exception.getMessage(), exception);
                         }
                     });
+
                 }
 
                 // Vérifier si c'est un lien YouTube
