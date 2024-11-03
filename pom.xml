@@ -44,6 +44,12 @@
             <groupId>dev.arbjerg</groupId>
             <artifactId>lavaplayer</artifactId>
             <version>2.2.2</version>
+            <exclusions>
+        <exclusion>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </exclusion>
+    </exclusions>
         </dependency>
         <dependency>
             <groupId>com.github.topi314.lavalyrics</groupId>
@@ -55,6 +61,12 @@
             <artifactId>lavasrc</artifactId>
             <version>4.3.0</version>
         </dependency>
+        <dependency>
+            <groupId>com.github.topi314.lavasrc</groupId>
+            <artifactId>lavasrc-plugin</artifactId>
+            <version>4.3.0</version>
+        </dependency>
+
         <dependency>
             <groupId>com.github.topi314.lavasearch</groupId>
             <artifactId>lavasearch</artifactId>
@@ -95,11 +107,18 @@
             <version>20230227</version>
         </dependency>
         <!-- Spotify Api -->
-        <dependency>
-            <groupId>se.michaelthelin.spotify</groupId>
-            <artifactId>spotify-web-api-java</artifactId>
-            <version>7.0.0</version>
-        </dependency>
+     <dependency>
+    <groupId>se.michaelthelin.spotify</groupId>
+    <artifactId>spotify-web-api-java</artifactId>
+    <version>7.0.0</version>
+    <exclusions>
+        <exclusion>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </exclusion>
+    </exclusions>
+</dependency>
+
 
     </dependencies>
     <build>

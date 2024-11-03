@@ -1,33 +1,42 @@
-// TrackScheduler.java
 package com.MellianBot;
 
+import com.google.api.services.youtube.YouTube;
+import com.google.api.services.youtube.model.Video;
+import com.google.api.services.youtube.model.VideoSnippet;
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayer;
-import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import com.sedmelluq.discord.lavaplayer.player.event.AudioEventAdapter;
-import com.sedmelluq.discord.lavaplayer.player.event.TrackEndEvent;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrackEndReason;
 import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.JDA;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
+import net.dv8tion.jda.api.EmbedBuilder;
 
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.awt.Color;
+import java.io.IOException;
 
 public class TrackScheduler extends AudioEventAdapter {
     private final AudioPlayer player;
     private Guild guild;
     private final BlockingQueue<AudioTrack> queue;
     private JDA jda;
+    private TextChannel textChannel;
     private AudioTrack currentTrack;
-    private static final Logger logger = LoggerFactory.getLogger(TrackScheduler.class);
+    private boolean looping = false;
+    private YouTube youTubeService;
 
-    public TrackScheduler(AudioPlayer player, Guild guild, JDA jda) {
+
+    public TrackScheduler(AudioPlayer player, Guild guild, JDA jda, TextChannel textChannel, YouTube youTubeService) {
         this.player = player;
         this.guild = guild;
         this.jda = jda;
+        this.textChannel = textChannel;
+        this.youTubeService = youTubeService; // Passez le service YouTube pour récupérer les informations
         this.queue = new LinkedBlockingQueue<>();
     }
 
@@ -39,18 +48,39 @@ public class TrackScheduler extends AudioEventAdapter {
         this.jda = jda;
     }
 
+    public void setChannel(TextChannel textChannel) {
+        this.textChannel = textChannel;
+    }
+
+    public void setLooping(boolean looping) {
+        this.looping = looping;
+    }
+
+    public boolean isLooping() {
+        return looping;
+    }
+
     public void queue(AudioTrack track) {
         if (!player.startTrack(track, true)) {
             queue.offer(track);
-            logger.info("Piste ajoutée à la file d'attente : {} | Source : {}", track.getInfo().title, track.getSourceManager().getSourceName());
         } else {
             currentTrack = track;
+    
+            // Extraire l'ID de la vidéo depuis l'URL
+            String videoId = extractYoutubeVideoId(track.getInfo().uri);
+            if (videoId != null) {
+                // Récupérer les informations de la vidéo YouTube
+                String[] videoInfo = getYoutubeVideoInfo(videoId);
+                // Définir les informations de la vidéo comme userData en s'assurant que c'est un tableau de chaînes
+                track.setUserData(videoInfo);  // Assurez-vous que videoInfo est bien de type String[]
+            }
+    
             updateBotActivity(track);
-            logger.info("Lecture de la piste : {}", track.getInfo().title);
+            sendNowPlayingMessage(track);
         }
     }
-
-
+    
+    
 
     public void nextTrack() {
         AudioTrack nextTrack = queue.poll();
@@ -58,68 +88,93 @@ public class TrackScheduler extends AudioEventAdapter {
             currentTrack = nextTrack;
             player.startTrack(nextTrack, false);
             updateBotActivity(nextTrack);
-            logger.info("Lecture de la piste suivante : {}", nextTrack.getInfo().title);
+            sendNowPlayingMessage(nextTrack);
         } else {
             if (player.getPlayingTrack() == null && guild != null) {
                 guild.getAudioManager().closeAudioConnection();
                 jda.getPresence().setActivity(Activity.watching("un bon gros boulard"));
-                logger.info("File d'attente vide, déconnexion du bot du canal vocal");
             }
         }
-    }
-
-
-
-    @Override
-    public void onTrackStart(AudioPlayer player, AudioTrack track) {
-        System.out.println("Début de lecture de la piste : " + track.getInfo().title);
-        logger.info("Track loaded: " + track.getInfo().title);
     }
 
     @Override
     public void onTrackEnd(AudioPlayer player, AudioTrack track, AudioTrackEndReason endReason) {
-        logger.info("Fin de la piste : {}, raison : {}", track.getInfo().title, endReason);
-        if (endReason == AudioTrackEndReason.LOAD_FAILED) {
-            logger.error("Le chargement de la piste a échoué. Détails de la piste : titre = {}, URI = {}, source = {}",
-                    track.getInfo().title, track.getInfo().uri, track.getSourceManager().getSourceName());
-
-            // Capturer l'exception si elle est présente
-            if (track.getUserData() instanceof FriendlyException) {
-                FriendlyException exception = (FriendlyException) track.getUserData();
-                logger.error("Exception lors du chargement de la piste : {}", exception.getMessage(), exception);
+        if (endReason.mayStartNext) {
+            if (looping) {
+                player.startTrack(track.makeClone(), false);
+            } else {
+                nextTrack();
             }
         }
-
-        if (endReason.mayStartNext) {
-            nextTrack();
-        }
     }
 
-
-
-
-
-    // Méthode pour skipper une piste
     public void skipTrack() {
-        nextTrack();  // Passe à la piste suivante dans la file d'attente
+        nextTrack();
     }
 
-    // Méthode pour récupérer la file d'attente
     public BlockingQueue<AudioTrack> getQueue() {
         return queue;
     }
 
-    // Méthode pour obtenir la piste en cours de lecture
     public AudioTrack getCurrentTrack() {
         return currentTrack;
     }
+    private String[] getYoutubeVideoInfo(String videoId) {
+        try {
+            // Créez une demande avec "snippet" comme partie
+            YouTube.Videos.List request = youTubeService.videos().list("snippet");
+            
+            // Utilisez Collections.singletonList pour passer la liste des IDs de vidéos
+            request.setId(videoId); // Changez cela pour utiliser la seule vidéo ID
+    
+            request.setFields("items(snippet(title, channelTitle, thumbnails))");
+            
+            Video video = request.execute().getItems().get(0);
+            VideoSnippet snippet = video.getSnippet();
+    
+            String title = snippet.getTitle();
+            String channelTitle = snippet.getChannelTitle();
+            String thumbnailUrl = snippet.getThumbnails().getHigh().getUrl();
+    
+            return new String[]{title, channelTitle, thumbnailUrl};
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return new String[]{"Unknown Title", "Unknown Channel", "https://via.placeholder.com/150"};
+    }
+    
+    private void sendNowPlayingMessage(AudioTrack track) {
+        // Récupération directe des informations depuis AudioTrack
+        String trackTitle = track.getInfo().title != null ? track.getInfo().title : "Unknown Title";
+        String trackAuthor = track.getInfo().author != null ? track.getInfo().author : "Unknown Artist/Channel";
+        String videoId = extractYoutubeVideoId(track.getInfo().uri);
+        String thumbnailUrl = videoId != null ? "https://img.youtube.com/vi/" + videoId + "/hqdefault.jpg" : "https://via.placeholder.com/150";
+    
+        EmbedBuilder embedBuilder = new EmbedBuilder()
+                .setTitle("En cours de lecture", track.getInfo().uri)
+                .setDescription("**Titre :** " + trackTitle + "\n**Artiste/Chaine :** " + trackAuthor)
+                .setThumbnail(thumbnailUrl)
+                .setColor(Color.GREEN);
+    
+        if (textChannel != null) {
+            textChannel.sendMessageEmbeds(embedBuilder.build()).queue();
+        }
+    }
+    
+    
 
-    // Méthode pour mettre à jour l'activité du bot
     private void updateBotActivity(AudioTrack track) {
         String trackTitle = (String) track.getUserData();
         if (trackTitle == null) {
             trackTitle = "Titre inconnu";
         }
         jda.getPresence().setActivity(Activity.listening(trackTitle));
+    }
+
+    private String extractYoutubeVideoId(String url) {
+        String pattern = "(?<=watch\\?v=|youtu.be\\/)[^&]+";
+        Pattern compiledPattern = Pattern.compile(pattern);
+        Matcher matcher = compiledPattern.matcher(url);
+        return matcher.find() ? matcher.group() : null;
     }
 }
