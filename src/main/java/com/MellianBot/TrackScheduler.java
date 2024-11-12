@@ -20,9 +20,7 @@ import java.util.Deque;
 
 import java.awt.Color;
 import java.io.IOException;
-import java.io.InputStream;
 import java.time.Duration;
-import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -209,15 +207,12 @@ public class TrackScheduler extends AudioEventAdapter {
 
     // Récupère la clé API YouTube
     private String getYoutubeApiKey() {
-        try (InputStream input = TrackScheduler.class.getClassLoader().getResourceAsStream("config.properties")) {
-            if (input == null) return null;
-            Properties properties = new Properties();
-            properties.load(input);
-            return properties.getProperty("youtube.api.key");
-        } catch (IOException ex) {
-            ex.printStackTrace();
+        String apiKey = System.getenv("YOUTUBE_API_KEY");
+        if (apiKey == null || apiKey.isEmpty()) {
+            System.err.println("Erreur : La clé API YouTube (YOUTUBE_API_KEY) est manquante. Assurez-vous qu'elle est définie dans les variables d'environnement.");
             return null;
         }
+        return apiKey;
     }
 
     // Formate la durée au format minutes:secondes

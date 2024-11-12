@@ -7,9 +7,7 @@ import com.google.api.services.youtube.model.VideoListResponse;
 import net.dv8tion.jda.api.entities.channel.unions.MessageChannelUnion;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.List;
-import java.util.Properties;
 
 public class YouTubeSearcher {
     private final YouTube youTube;
@@ -20,7 +18,10 @@ public class YouTubeSearcher {
 
     public String searchYoutube(String query, MusicManager musicManager, MessageChannelUnion channel) {
         String youtubeApiKey = getYoutubeApiKey();
-        if (youtubeApiKey == null) return null;
+        if (youtubeApiKey == null) {
+            channel.sendMessage("Erreur : Clé API YouTube non définie.").queue();
+            return null;
+        }
 
         try {
             YouTube.Search.List request = youTube.search().list("id,snippet");
@@ -50,7 +51,10 @@ public class YouTubeSearcher {
 
     public String getTitleByVideoId(String videoId) {
         String youtubeApiKey = getYoutubeApiKey();
-        if (youtubeApiKey == null) return null;
+        if (youtubeApiKey == null) {
+            System.out.println("Erreur : Clé API YouTube non définie.");
+            return null;
+        }
 
         try {
             YouTube.Videos.List request = youTube.videos().list("snippet");
@@ -72,20 +76,12 @@ public class YouTubeSearcher {
     }
 
 
-
     private String getYoutubeApiKey() {
-        Properties properties = new Properties();
-        try (InputStream input = YouTubeSearcher.class.getClassLoader().getResourceAsStream("config.properties")) {
-            if (input == null) {
-                System.out.println("Sorry, unable to find config.properties");
-                return null;
-            }
-            properties.load(input);
-            return properties.getProperty("youtube.api.key");
-
-        } catch (IOException ex) {
-            ex.printStackTrace();
-            return null;
+        String apiKey = System.getenv("YOUTUBE_API_KEY");
+        if (apiKey == null || apiKey.isEmpty()) {
+            System.err.println("Erreur : La clé API YouTube (YOUTUBE_API_KEY) est manquante. Assurez-vous qu'elle est définie dans les variables d'environnement.");
         }
+        return apiKey;
     }
+
 }
