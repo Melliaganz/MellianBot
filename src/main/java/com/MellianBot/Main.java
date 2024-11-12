@@ -293,11 +293,15 @@ public class Main extends ListenerAdapter {
     
 
     private void handleClearCommand(MessageReceivedEvent event) {
-        if (musicManager != null) {
-            musicManager.getScheduler().clearQueue();
-            event.getChannel().sendMessage("File d'attente vidée.").queue();
-        }
+        Guild guild = event.getGuild();
+        TextChannel textChannel = event.getChannel().asTextChannel();
+        JDA jda = event.getJDA();
+        MusicManager musicManager = botMusicService.getMusicManager(guild, textChannel, jda);
+    
+        musicManager.getScheduler().clearQueue();
+        event.getChannel().sendMessage("File d'attente vidée.").queue();
     }
+    
 
     private void handleQueueCommand(MessageReceivedEvent event) {
         if (musicManager != null) {
