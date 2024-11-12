@@ -2,49 +2,45 @@ package com.MellianBot;
 
 import com.google.api.services.youtube.YouTube;
 import com.google.api.services.youtube.model.Video;
+import com.google.api.services.youtube.model.VideoListResponse;
 import com.google.api.services.youtube.model.VideoSnippet;
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayer;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import com.sedmelluq.discord.lavaplayer.player.event.AudioEventAdapter;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrackEndReason;
-import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
+import net.dv8tion.jda.api.entities.channel.unions.MessageChannelUnion;
 import net.dv8tion.jda.api.EmbedBuilder;
+import net.dv8tion.jda.api.entities.Activity;
 
+import java.awt.Color;
+import java.io.IOException;
+import java.io.InputStream;
+import java.time.Duration;
+import java.util.List;
+import java.util.Properties;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.awt.Color;
-import java.io.IOException;
+import java.util.stream.Collectors;
 
 public class TrackScheduler extends AudioEventAdapter {
     private final AudioPlayer player;
-    private Guild guild;
     private final BlockingQueue<AudioTrack> queue;
-    private JDA jda;
     private TextChannel textChannel;
     private AudioTrack currentTrack;
     private boolean looping = false;
     private YouTube youTubeService;
-
+    private JDA jda;
 
     public TrackScheduler(AudioPlayer player, Guild guild, JDA jda, TextChannel textChannel, YouTube youTubeService) {
         this.player = player;
-        this.guild = guild;
-        this.jda = jda;
         this.textChannel = textChannel;
-        this.youTubeService = youTubeService; // Passez le service YouTube pour récupérer les informations
+        this.youTubeService = youTubeService;
         this.queue = new LinkedBlockingQueue<>();
-    }
-
-    public void setGuild(Guild guild) {
-        this.guild = guild;
-    }
-
-    public void setJDA(JDA jda) {
         this.jda = jda;
     }
 
@@ -65,37 +61,33 @@ public class TrackScheduler extends AudioEventAdapter {
             queue.offer(track);
         } else {
             currentTrack = track;
-    
-            // Extraire l'ID de la vidéo depuis l'URL
             String videoId = extractYoutubeVideoId(track.getInfo().uri);
             if (videoId != null) {
-                // Récupérer les informations de la vidéo YouTube
-                String[] videoInfo = getYoutubeVideoInfo(videoId);
-                // Définir les informations de la vidéo comme userData en s'assurant que c'est un tableau de chaînes
-                track.setUserData(videoInfo);  // Assurez-vous que videoInfo est bien de type String[]
+                TrackInfo videoInfo = getYoutubeVideoInfo(videoId);
+                track.setUserData(videoInfo);
             }
-    
             updateBotActivity(track);
             sendNowPlayingMessage(track);
         }
     }
+    public void updateBotActivityToDefault() {
+        jda.getPresence().setActivity(Activity.watching("comment faire avec !help"));
+        System.out.println("Aucune piste en cours. Activité du bot réinitialisée.");
+    }
     
-    
-
     public void nextTrack() {
         AudioTrack nextTrack = queue.poll();
         if (nextTrack != null) {
-            currentTrack = nextTrack;
             player.startTrack(nextTrack, false);
+            currentTrack = nextTrack;
             updateBotActivity(nextTrack);
             sendNowPlayingMessage(nextTrack);
         } else {
-            if (player.getPlayingTrack() == null && guild != null) {
-                guild.getAudioManager().closeAudioConnection();
-                jda.getPresence().setActivity(Activity.watching("un bon gros boulard"));
-            }
+            disconnectIfQueueEmpty();
+            updateBotActivityToDefault();
         }
     }
+    
 
     @Override
     public void onTrackEnd(AudioPlayer player, AudioTrack track, AudioTrackEndReason endReason) {
@@ -104,12 +96,71 @@ public class TrackScheduler extends AudioEventAdapter {
                 player.startTrack(track.makeClone(), false);
             } else {
                 nextTrack();
+                // Si aucune piste suivante n'est trouvée, réinitialiser l'activité
+                if (queue.isEmpty()) {
+                    updateBotActivityToDefault();
+                }
             }
         }
     }
+    
 
     public void skipTrack() {
         nextTrack();
+    }
+
+    public void pauseTrack() {
+        player.setPaused(true);
+        if (textChannel != null) {
+            textChannel.sendMessage("Lecture mise en pause.").queue();
+        }
+    }
+
+    public void resumeTrack() {
+        player.setPaused(false);
+        if (textChannel != null) {
+            textChannel.sendMessage("Lecture reprise.").queue();
+        }
+    }
+
+    public void stopTrack() {
+        player.stopTrack();
+        queue.clear();
+        if (textChannel != null) {
+            textChannel.sendMessage("Lecture arrêtée et file d'attente vidée.").queue();
+        }
+        disconnectIfQueueEmpty();
+        updateBotActivityToDefault();
+    }
+    
+
+    public void clearQueue() {
+        queue.clear();
+        if (textChannel != null) {
+            textChannel.sendMessage("File d'attente vidée.").queue();
+        }
+    }
+
+    public void showQueue() {
+        if (queue.isEmpty()) {
+            textChannel.sendMessage("La file d'attente est vide.").queue();
+            return;
+        }
+        List<String> trackList = queue.stream().map(track -> {
+            TrackInfo info = (TrackInfo) track.getUserData();
+            return "- " + (info != null ? info.getTitle() : track.getInfo().title);
+        }).collect(Collectors.toList());
+
+        String queueMessage = "File d'attente :\n" + String.join("\n", trackList);
+        textChannel.sendMessage(queueMessage).queue();
+    }
+
+    public void showCurrentTrack(MessageChannelUnion messageChannelUnion) {
+        if (currentTrack != null) {
+            sendNowPlayingMessage(currentTrack);
+        } else {
+            textChannel.sendMessage("Aucune piste n'est actuellement en cours de lecture.").queue();
+        }
     }
 
     public BlockingQueue<AudioTrack> getQueue() {
@@ -119,40 +170,77 @@ public class TrackScheduler extends AudioEventAdapter {
     public AudioTrack getCurrentTrack() {
         return currentTrack;
     }
-    private String[] getYoutubeVideoInfo(String videoId) {
+
+    public TrackInfo getYoutubeVideoInfo(String videoId) {
         try {
-            // Créez une demande avec "snippet" comme partie
-            YouTube.Videos.List request = youTubeService.videos().list("snippet");
+            YouTube.Videos.List request = youTubeService.videos().list("snippet,contentDetails");
+            request.setId(videoId);
+            request.setFields("items(snippet(title, channelTitle, thumbnails), contentDetails(duration))");
             
-            // Utilisez Collections.singletonList pour passer la liste des IDs de vidéos
-            request.setId(videoId); // Changez cela pour utiliser la seule vidéo ID
+            // Ajouter la clé d'API ici
+            String youtubeApiKey = getYoutubeApiKey();
+            if (youtubeApiKey == null) {
+                System.out.println("Erreur : Clé d'API YouTube non trouvée.");
+                return new TrackInfo("Unknown Title", "Unknown Duration", "Unknown Channel", "https://via.placeholder.com/150", "https://youtube.com");
+            }
+            request.setKey(youtubeApiKey);
     
-            request.setFields("items(snippet(title, channelTitle, thumbnails))");
-            
-            Video video = request.execute().getItems().get(0);
+            VideoListResponse response = request.execute();
+            if (response.getItems().isEmpty()) {
+                return new TrackInfo("Unknown Title", "Unknown Duration", "Unknown Channel", "https://via.placeholder.com/150", "https://youtube.com");
+            }
+    
+            Video video = response.getItems().get(0);
             VideoSnippet snippet = video.getSnippet();
+            String duration = formatDuration(video.getContentDetails().getDuration());
     
             String title = snippet.getTitle();
             String channelTitle = snippet.getChannelTitle();
             String thumbnailUrl = snippet.getThumbnails().getHigh().getUrl();
     
-            return new String[]{title, channelTitle, thumbnailUrl};
+            return new TrackInfo(title, duration, channelTitle, thumbnailUrl, "https://www.youtube.com/watch?v=" + videoId);
         } catch (IOException e) {
             e.printStackTrace();
         }
-        return new String[]{"Unknown Title", "Unknown Channel", "https://via.placeholder.com/150"};
+        return new TrackInfo("Unknown Title", "Unknown Duration", "Unknown Channel", "https://via.placeholder.com/150", "https://youtube.com");
     }
     
+    private String getYoutubeApiKey() {
+        Properties properties = new Properties();
+        try (InputStream input = TrackScheduler.class.getClassLoader().getResourceAsStream("config.properties")) {
+            if (input == null) {
+                System.out.println("Désolé, impossible de trouver config.properties");
+                return null;
+            }
+            properties.load(input);
+            return properties.getProperty("youtube.api.key");
+
+        } catch (IOException ex) {
+            ex.printStackTrace();
+            return null;
+        }
+    }
+
     private void sendNowPlayingMessage(AudioTrack track) {
-        // Récupération directe des informations depuis AudioTrack
-        String trackTitle = track.getInfo().title != null ? track.getInfo().title : "Unknown Title";
-        String trackAuthor = track.getInfo().author != null ? track.getInfo().author : "Unknown Artist/Channel";
-        String videoId = extractYoutubeVideoId(track.getInfo().uri);
-        String thumbnailUrl = videoId != null ? "https://img.youtube.com/vi/" + videoId + "/hqdefault.jpg" : "https://via.placeholder.com/150";
+        Object userData = track.getUserData();
+        String trackTitle = "Unknown Title";
+        String trackAuthor = "Unknown Artist/Channel";
+        String trackDuration = "Unknown Duration";
+        String thumbnailUrl = "https://via.placeholder.com/150";
+        String originalUrl = track.getInfo().uri;
+    
+        if (userData instanceof TrackInfo) {
+            TrackInfo trackInfo = (TrackInfo) userData;
+            trackTitle = trackInfo.getTitle();
+            trackAuthor = trackInfo.getArtist();
+            trackDuration = trackInfo.getDuration();
+            thumbnailUrl = trackInfo.getThumbnailUrl();
+            originalUrl = trackInfo.getVideoUrl();
+        }
     
         EmbedBuilder embedBuilder = new EmbedBuilder()
-                .setTitle("En cours de lecture", track.getInfo().uri)
-                .setDescription("**Titre :** " + trackTitle + "\n**Artiste/Chaine :** " + trackAuthor)
+                .setTitle("En cours de lecture", originalUrl)
+                .setDescription("**Titre :** " + trackTitle + "\n**Artiste/Chaine :** " + trackAuthor + "\n**Durée :** " + trackDuration)
                 .setThumbnail(thumbnailUrl)
                 .setColor(Color.GREEN);
     
@@ -160,21 +248,78 @@ public class TrackScheduler extends AudioEventAdapter {
             textChannel.sendMessageEmbeds(embedBuilder.build()).queue();
         }
     }
-    
-    
 
-    private void updateBotActivity(AudioTrack track) {
-        String trackTitle = (String) track.getUserData();
-        if (trackTitle == null) {
-            trackTitle = "Titre inconnu";
+    public void updateBotActivity(AudioTrack track) {
+        Object userData = track.getUserData();
+        String title = "Unknown Title";
+
+        if (userData instanceof TrackInfo) {
+            TrackInfo trackInfo = (TrackInfo) userData;
+            title = trackInfo.getTitle();
         }
-        jda.getPresence().setActivity(Activity.listening(trackTitle));
+
+        jda.getPresence().setActivity(Activity.listening(title));
+        System.out.println("Lecture en cours : " + title);
     }
 
     private String extractYoutubeVideoId(String url) {
-        String pattern = "(?<=watch\\?v=|youtu.be\\/)[^&]+";
+        String pattern = "(?<=watch\\?v=|youtu\\.be/|youtube\\.com/embed/)[^&]+";
         Pattern compiledPattern = Pattern.compile(pattern);
         Matcher matcher = compiledPattern.matcher(url);
         return matcher.find() ? matcher.group() : null;
+    }
+
+    private String formatDuration(String isoDuration) {
+        Duration duration = Duration.parse(isoDuration);
+        long minutes = duration.toMinutes();
+        long seconds = duration.minusMinutes(minutes).getSeconds();
+        return String.format("%d:%02d", minutes, seconds);
+    }
+
+    private void disconnectIfQueueEmpty() {
+        if (queue.isEmpty() && player.getPlayingTrack() == null) {
+            if (textChannel != null) {
+                textChannel.sendMessage("File d'attente vide. Déconnexion du canal vocal.").queue();
+            }
+            if (textChannel.getGuild().getAudioManager().isConnected()) {
+                textChannel.getGuild().getAudioManager().closeAudioConnection();
+            }
+        }
+    }
+}
+
+class TrackInfo {
+    private final String title;
+    private final String duration;
+    private final String artist;
+    private final String thumbnailUrl;
+    private final String videoUrl;
+
+    public TrackInfo(String title, String duration, String artist, String thumbnailUrl, String videoUrl) {
+        this.title = title;
+        this.duration = duration;
+        this.artist = artist;
+        this.thumbnailUrl = thumbnailUrl;
+        this.videoUrl = videoUrl;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public String getDuration() {
+        return duration;
+    }
+
+    public String getArtist() {
+        return artist;
+    }
+
+    public String getThumbnailUrl() {
+        return thumbnailUrl;
+    }
+
+    public String getVideoUrl() {
+        return videoUrl;
     }
 }

@@ -30,7 +30,6 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Base64;
 import java.util.Properties;
-import java.util.concurrent.BlockingQueue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -50,15 +49,16 @@ public class Main extends ListenerAdapter {
         Properties properties = new Properties();
         try (InputStream input = Main.class.getClassLoader().getResourceAsStream("config.properties")) {
             if (input == null) {
-                System.out.println("Désolé, impossible de trouver config.properties");
-                return;
+                System.out.println("Désolé, impossible de trouver config.properties. Utilisation des valeurs par défaut.");
+                setDefaultProperties(properties);
+            } else {
+                properties.load(input);
             }
-            properties.load(input);
         } catch (IOException ex) {
             ex.printStackTrace();
         }
-        this.spotifyClientId = properties.getProperty("spotify.client.id");
-        this.spotifyClientSecret = properties.getProperty("spotify.client.secret");
+        this.spotifyClientId = properties.getProperty("spotify.client.id", "defaultClientId");
+        this.spotifyClientSecret = properties.getProperty("spotify.client.secret", "defaultClientSecret");
         this.spotifyAccessToken = getSpotifyAccessToken();
         if (spotifyAccessToken != null) {
             SpotifySourceManager spotifySourceManager = new SpotifySourceManager(
@@ -84,14 +84,15 @@ public class Main extends ListenerAdapter {
         Properties properties = new Properties();
         try (InputStream input = Main.class.getClassLoader().getResourceAsStream("config.properties")) {
             if (input == null) {
-                System.out.println("Désolé, impossible de trouver config.properties");
-                return;
+                System.out.println("Désolé, impossible de trouver config.properties. Utilisation des valeurs par défaut.");
+                setDefaultProperties(properties);
+            } else {
+                properties.load(input);
             }
-            properties.load(input);
         } catch (IOException ex) {
             ex.printStackTrace();
         }
-        String discordToken = properties.getProperty("discord.api.key");
+        String discordToken = properties.getProperty("discord.api.key", "defaultDiscordToken");
         JDABuilder builder = JDABuilder.createDefault(discordToken,
                 GatewayIntent.GUILD_MESSAGES,
                 GatewayIntent.MESSAGE_CONTENT,
@@ -103,36 +104,48 @@ public class Main extends ListenerAdapter {
         builder.build();
     }
 
+    private static void setDefaultProperties(Properties properties) {
+        properties.setProperty("spotify.client.id", "defaultClientId");
+        properties.setProperty("spotify.client.secret", "defaultClientSecret");
+        properties.setProperty("discord.api.key", "defaultDiscordToken");
+    }
+
     public String getSpotifyAccessToken() {
         String auth = spotifyClientId + ":" + spotifyClientSecret;
         String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
-        try {
-            URL url = new URL("https://accounts.spotify.com/api/token");
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Authorization", "Basic " + encodedAuth);
-            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-            conn.setDoOutput(true);
-            String urlParameters = "grant_type=client_credentials";
-            try (OutputStream os = conn.getOutputStream()) {
-                byte[] input = urlParameters.getBytes("utf-8");
-                os.write(input, 0, input.length);
-            }
-            if (conn.getResponseCode() == 200) {
-                BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "utf-8"));
-                StringBuilder response = new StringBuilder();
-                String responseLine;
-                while ((responseLine = br.readLine()) != null) {
-                    response.append(responseLine.trim());
+        int retryCount = 0;
+        while (retryCount < 3) {
+            try {
+                URL url = new URL("https://accounts.spotify.com/api/token");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Authorization", "Basic " + encodedAuth);
+                conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                conn.setDoOutput(true);
+                String urlParameters = "grant_type=client_credentials";
+                try (OutputStream os = conn.getOutputStream()) {
+                    byte[] input = urlParameters.getBytes("utf-8");
+                    os.write(input, 0, input.length);
                 }
-                JsonObject jsonObject = JsonParser.parseString(response.toString()).getAsJsonObject();
-                return jsonObject.get("access_token").getAsString();
-            } else {
-                System.out.println("Erreur : Code de réponse Spotify " + conn.getResponseCode());
+                if (conn.getResponseCode() == 200) {
+                    BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "utf-8"));
+                    StringBuilder response = new StringBuilder();
+                    String responseLine;
+                    while ((responseLine = br.readLine()) != null) {
+                        response.append(responseLine.trim());
+                    }
+                    JsonObject jsonObject = JsonParser.parseString(response.toString()).getAsJsonObject();
+                    return jsonObject.get("access_token").getAsString();
+                } else {
+                    System.out.println("Erreur : Code de réponse Spotify " + conn.getResponseCode());
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
             }
-        } catch (IOException e) {
-            e.printStackTrace();
+            retryCount++;
+            System.out.println("Retrying to fetch Spotify access token... (Attempt " + (retryCount + 1) + "/3)");
         }
+        System.out.println("Échec de l'obtention du token d'accès Spotify après plusieurs tentatives.");
         return null;
     }
 
@@ -150,12 +163,17 @@ public class Main extends ListenerAdapter {
             AudioChannelUnion channelUnion = voiceState.getChannel();
             if (channelUnion instanceof VoiceChannel) {
                 VoiceChannel channel = (VoiceChannel) channelUnion;
-                event.getGuild().getAudioManager().openAudioConnection(channel);
-                System.out.println("Bot connecté au canal vocal : " + channel.getName());
+                if (!event.getGuild().getAudioManager().isConnected()) {
+                    event.getGuild().getAudioManager().openAudioConnection(channel);
+                    System.out.println("Bot connecté au canal vocal : " + channel.getName());
+                } else {
+                    System.out.println("Bot déjà connecté à un canal vocal.");
+                }
                 if (musicManager == null) {
                     musicManager = new MusicManager(playerManager, event.getGuild(), event.getJDA(), event.getChannel().asTextChannel(), youTubeService);
-                }                
+                }
                 event.getGuild().getAudioManager().setSendingHandler(new AudioPlayerSendHandler(musicManager.getPlayer()));
+
                 if (input.startsWith("https://open.spotify.com/")) {
                     System.out.println("Traitement du lien Spotify en recherche YouTube : " + input);
                     String spotifyTrackTitle = getTrackTitleFromSpotify(input);
@@ -166,37 +184,13 @@ public class Main extends ListenerAdapter {
                             if (streamData != null) {
                                 String streamUrl = streamData[0];
                                 String title = streamData[1];
+                                String duration = streamData[3];
                                 String thumbnailUrl = streamData[2];
-                                
-                                playerManager.loadItem(streamUrl, new AudioLoadResultHandler(){
-                                    @Override
-            public void trackLoaded(AudioTrack track) {
-                // Set title, author, and thumbnail URL as user data
-                track.setUserData(new String[]{title, spotifyTrackTitle, thumbnailUrl});
-                
-                event.getChannel().sendMessage("Ajouté à la file d'attente (YouTube) : " + title).queue();
-                musicManager.getScheduler().queue(track);
-            }
-                                    
+                                String videoUrl = youtubeUrl;
+                                String artist = spotifyTrackTitle.split(" ", 2)[1];
 
-                                    @Override
-                                    public void playlistLoaded(AudioPlaylist playlist) {
-                                        event.getChannel().sendMessage("Playlist YouTube détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
-                                        for (AudioTrack track : playlist.getTracks()) {
-                                            musicManager.getScheduler().queue(track);
-                                        }
-                                    }
-
-                                    @Override
-                                    public void noMatches() {
-                                        event.getChannel().sendMessage("Aucune piste trouvée pour le lien YouTube.").queue();
-                                    }
-
-                                    @Override
-                                    public void loadFailed(FriendlyException exception) {
-                                        event.getChannel().sendMessage("Erreur lors du chargement de la piste YouTube.").queue();
-                                    }
-                                });
+                                TrackInfo trackInfo = new TrackInfo(title, duration, artist, thumbnailUrl, videoUrl);
+                                handleAudioLoadResult(streamUrl, trackInfo, event);
                             } else {
                                 event.getChannel().sendMessage("Erreur lors de la récupération du flux audio avec yt-dlp.").queue();
                             }
@@ -210,217 +204,111 @@ public class Main extends ListenerAdapter {
                     String[] streamData = getYoutubeStreamUrlAndTitle(input);
                     if (streamData != null) {
                         String streamUrl = streamData[0];
-                        playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
-                            @Override
-                            public void trackLoaded(AudioTrack track) {
-                                String title = track.getInfo().title != null ? track.getInfo().title : "Unknown Title";
-                                String author = track.getInfo().author != null ? track.getInfo().author : "Unknown Artist/Channel";
-                                String videoId = extractYoutubeVideoId(track.getInfo().uri);
-                                String thumbnailUrl = "https://img.youtube.com/vi/" + videoId + "/hqdefault.jpg";
-                            
-                                // Store title, author, and thumbnail URL in user data
-                                track.setUserData(new String[]{title, author, thumbnailUrl});
-                            
-                                event.getChannel().sendMessage("Ajouté à la file d'attente (YouTube) : " + title).queue();
-                                musicManager.getScheduler().queue(track);
-                            }
-                            
-
-                            @Override
-                            public void playlistLoaded(AudioPlaylist playlist) {
-                                event.getChannel().sendMessage("Playlist YouTube détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
-                                for (AudioTrack track : playlist.getTracks()) {
-                                    musicManager.getScheduler().queue(track);
-                                }
-                            }
-
-                            @Override
-                            public void noMatches() {
-                                event.getChannel().sendMessage("Aucune piste trouvée sur YouTube.").queue();
-                            }
-
-                            @Override
-                            public void loadFailed(FriendlyException exception) {
-                                event.getChannel().sendMessage("Erreur lors du chargement de la piste YouTube.").queue();
-                            }
-                        });
-                    } else {
-                        event.getChannel().sendMessage("Erreur lors de la récupération du flux audio avec yt-dlp.").queue();
-                    }
-                } else {
-                    String url = youTubeSearcher.searchYoutube(input, musicManager, event.getChannel());
-                    if (url == null) {
-                        event.getChannel().sendMessage("Aucun résultat trouvé sur YouTube.").queue();
-                        return;
-                    }
-                    String[] streamData = getYoutubeStreamUrlAndTitle(url);
-                    if (streamData != null) {
-                        String streamUrl = streamData[0];
                         String title = streamData[1];
-                        playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
-                            @Override
-                            public void trackLoaded(AudioTrack track) {
-                                track.setUserData(title);
-                                event.getChannel().sendMessage("Ajouté à la file d'attente : " + title).queue();
-                                musicManager.getScheduler().queue(track);
-                            }
+                        String duration = streamData[3];
+                        String videoId = extractYoutubeVideoId(input);
+                        String thumbnailUrl = "https://img.youtube.com/vi/" + videoId + "/hqdefault.jpg";
+                        String videoUrl = input;
 
-                            @Override
-                            public void playlistLoaded(AudioPlaylist playlist) {
-                                event.getChannel().sendMessage("Playlist YouTube détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
-                                for (AudioTrack track : playlist.getTracks()) {
-                                    musicManager.getScheduler().queue(track);
-                                }
-                            }
+                        TrackInfo videoInfo = musicManager.getScheduler().getYoutubeVideoInfo(videoId);
+                        String artist = videoInfo.getArtist();
 
-                            @Override
-                            public void noMatches() {
-                                event.getChannel().sendMessage("Impossible de trouver cette piste sur YouTube.").queue();
-                            }
-
-                            @Override
-                            public void loadFailed(FriendlyException exception) {
-                                event.getChannel().sendMessage("Erreur lors du chargement de la piste YouTube : " + exception.getMessage()).queue();
-                                exception.printStackTrace();
-                            }
-                        });
+                        // Création de l'objet TrackInfo
+                        TrackInfo trackInfo = new TrackInfo(title, duration, artist, thumbnailUrl, videoUrl);
+                        handleAudioLoadResult(streamUrl, trackInfo, event);
                     } else {
                         event.getChannel().sendMessage("Erreur lors de la récupération du flux audio avec yt-dlp.").queue();
                     }
                 }
-            } else {
-                event.getChannel().sendMessage("Vous devez être dans un canal vocal pour jouer de la musique !").queue();
             }
-        }
-
-        if (message.equals("!help")) {
-            String helpMessage = "**Commandes disponibles :**\n" +
-                    "`!play <lien ou mots-clés>` : Joue une piste depuis un lien (YouTube ou Spotify) ou effectue une recherche par mots-clés.\n" +
-                    "`!queue` : Affiche la file d'attente des pistes.\n" +
-                    "`!current` : Affiche la piste en cours de lecture.\n" +
-                    "`!pause` : Met la musique en pause.\n" +
-                    "`!resume` : Relance la musique en cours.\n"+
-                    "`!skip` : Passe à la piste suivante dans la file d'attente.\n" +
-                    "`!stop` : Arrête la piste et vide la file d'attente.\n"+
-                    "`!restart` : Remet la piste en cours au début.\n" +
-                    "`!loop` : Fait boucler la piste en cours.\n" +
-                    "`!help` : Affiche ce message d'aide.";
-    
-            event.getChannel().sendMessage(helpMessage).queue();
-            return;
-        }
-        if (message.equals("!queue")) {
-            BlockingQueue<AudioTrack> queue = musicManager.getScheduler().getQueue();
-            if (queue.isEmpty()) {
-                event.getChannel().sendMessage("La file d'attente est vide.").queue();
-            } else {
-                StringBuilder queueList = new StringBuilder("**File d'attente :**\n");
-                int trackNumber = 1;
-                long totalDuration = 0;
-        
-                for (AudioTrack track : queue) {
-                    String trackTitle = (String) track.getUserData();
-                    if (trackTitle == null) {
-                        trackTitle = "Titre inconnu (" + track.getInfo().uri + ")";
-                    }
-                    String trackDuration = formatDuration(track.getDuration());
-                    totalDuration += track.getDuration();
-                    queueList.append("`").append(trackNumber).append(".` ")
-                             .append(trackTitle).append(" - ").append(trackDuration).append("\n");
-                    trackNumber++;
-                }
-        
-                String formattedTotalDuration = formatDuration(totalDuration);
-                queueList.append("\n**Durée totale de la playlist :** ").append(formattedTotalDuration);
-                event.getChannel().sendMessage(queueList.toString()).queue();
+        } else if (message.startsWith("!pause")) {
+            if (musicManager != null) {
+                musicManager.getScheduler().pauseTrack();
+                event.getChannel().sendMessage("Lecture mise en pause.").queue();
             }
-        }
-        if (message.equals("!loop")) {
-            boolean isLooping = musicManager.getScheduler().isLooping();
-            musicManager.getScheduler().setLooping(!isLooping);
-        
-            String loopStatus = isLooping ? "désactivée" : "activée";
-            event.getChannel().sendMessage("La boucle a été " + loopStatus + " pour la piste en cours.").queue();
-            return;
-        }
-        if (message.equals("!restart")) {
-            AudioTrack currentTrack = musicManager.getPlayer().getPlayingTrack();
-            if (currentTrack != null) {
-                currentTrack.setPosition(0);
-                event.getChannel().sendMessage("La piste a été remise au début : " + currentTrack.getInfo().title).queue();
-            } else {
-                event.getChannel().sendMessage("Aucune piste n'est en cours de lecture pour être remise au début.").queue();
+        } else if (message.startsWith("!resume")) {
+            if (musicManager != null) {
+                musicManager.getScheduler().resumeTrack();
+                event.getChannel().sendMessage("Lecture reprise.").queue();
             }
-            return;
-        }
-        
-        if (message.equals("!stop")) {
-            musicManager.getScheduler().getQueue().clear();
-            musicManager.getPlayer().stopTrack();
-            musicManager.getPlayer().setPaused(false);
-            event.getGuild().getAudioManager().closeAudioConnection();
-            event.getChannel().sendMessage("Musique arrêtée et file d'attente vidée.").queue();
-            return;
-        }
-        if (message.equals("!current")) {
-            AudioTrack currentTrack = musicManager.getScheduler().getCurrentTrack();
-            if (currentTrack != null) {
-                String trackTitle = (String) currentTrack.getUserData();
-                if (trackTitle == null) {
-                    trackTitle = "Titre inconnu";
-                }
+        } else if (message.startsWith("!skip")) {
+            if (musicManager != null) {
+                musicManager.getScheduler().skipTrack();
+                event.getChannel().sendMessage("Piste sautée.").queue();
+            }
+        } else if (message.startsWith("!stop")) {
+            if (musicManager != null) {
+                musicManager.getScheduler().stopTrack();
+                event.getChannel().sendMessage("Lecture arrêtée et file d'attente vidée.").queue();
+            }
+        } else if (message.startsWith("!clear")) {
+            if (musicManager != null) {
+                musicManager.getScheduler().clearQueue();
+                event.getChannel().sendMessage("File d'attente vidée.").queue();
+            }
+        } else if (message.startsWith("!queue")) {
+            if (musicManager != null) {
+                musicManager.getScheduler().showQueue();
+            }
+        } else if (message.startsWith("!current")) {
+            if (musicManager != null) {
+                musicManager.getScheduler().showCurrentTrack(event.getChannel());
+            }
+        } else if (message.startsWith("!loop")) {
+            if (musicManager != null) {
+                boolean currentLooping = musicManager.getScheduler().isLooping();
+                musicManager.getScheduler().setLooping(!currentLooping);
                 
-                long position = currentTrack.getPosition();
-                long duration = currentTrack.getDuration();
-                long timeRemaining = duration - position;
-        
-                String formattedPosition = formatDuration(position);
-                String formattedDuration = formatDuration(duration);
-                String formattedRemaining = formatDuration(timeRemaining);
-        
-                String trackInfo = "**En cours de lecture :**\n" +
-                        "Titre : " + trackTitle + "\n" +
-                        "Temps écoulé : `" + formattedPosition + "` / `" + formattedDuration + "`\n" +
-                        "Temps restant : `" + formattedRemaining + "`";
-        
-                event.getChannel().sendMessage(trackInfo).queue();
-            } else {
-                event.getChannel().sendMessage("Aucune musique n'est en cours de lecture.").queue();
+                // Envoyer uniquement le message indiquant que la boucle a été activée/désactivée sans renvoyer les informations de la piste
+                event.getChannel().sendMessage("Lecture en boucle " + (!currentLooping ? "activée" : "désactivée") + ".").queue();
             }
+        } else if (message.startsWith("!help")) {
+            String helpMessage = "Commandes disponibles :\n" +
+                    "!play <lien ou mots-clés> : Joue la musique demandée.\n" +
+                    "!current : affiche les infos de la piste en cours." +
+                    "!loop : Permet de jouer en boucle la track en cours." +
+                    "!pause : Met la lecture en pause.\n" +
+                    "!resume : Reprend la lecture.\n" +
+                    "!skip : Saute la piste en cours.\n" +
+                    "!stop : Arrête la lecture et vide la file d'attente.\n" +
+                    "!clear : Vide la file d'attente sans arrêter la piste en cours.\n" +
+                    "!queue : Affiche les pistes présentes dans la file d'attente.\n" +
+                    "!current : Affiche la piste en cours de lecture.\n" +
+                    "!help : Affiche toutes les commandes.";
+            event.getChannel().sendMessage(helpMessage).queue();
         }
-        
+    }
 
-        if (message.equals("!pause")) {
-            musicManager.getPlayer().setPaused(true);
-            event.getChannel().sendMessage("Musique mise en pause. Utilisez `!resume` pour reprendre.").queue();
-            return;
-        }
-        if (message.equals("!resume")) {
-            if (musicManager.getPlayer().isPaused()) {
-                musicManager.getPlayer().setPaused(false);
-                event.getChannel().sendMessage("Reprise de la musique.").queue();
-            } else {
-                event.getChannel().sendMessage("La musique est déjà en cours de lecture.").queue();
+    private void handleAudioLoadResult(String streamUrl, TrackInfo trackInfo, MessageReceivedEvent event) {
+        playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
+            @Override
+            public void trackLoaded(AudioTrack track) {
+                track.setUserData(trackInfo);
+                event.getChannel().sendMessage("Ajouté à la file d'attente : " + trackInfo.getTitle()).queue();
+                musicManager.getScheduler().queue(track);
             }
-            return;
-        }
-        if (message.startsWith("!skip")) {
-            TrackScheduler scheduler = musicManager.getScheduler();
-            if (musicManager.getPlayer().getPlayingTrack() != null) {
-                scheduler.skipTrack();
-                event.getChannel().sendMessage("Piste sautée ! Lecture de la piste suivante.").queue();
-            } else {
-                event.getChannel().sendMessage("Aucune piste en cours de lecture !").queue();
+
+            @Override
+            public void playlistLoaded(AudioPlaylist playlist) {
+                event.getChannel().sendMessage("Playlist détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
+                for (AudioTrack track : playlist.getTracks()) {
+                    musicManager.getScheduler().queue(track);
+                }
             }
-        }
+
+            @Override
+            public void noMatches() {
+                event.getChannel().sendMessage("Aucune piste trouvée.").queue();
+            }
+
+            @Override
+            public void loadFailed(FriendlyException exception) {
+                event.getChannel().sendMessage("Erreur lors du chargement de la piste : " + exception.getMessage()).queue();
+            }
+        });
     }
-    private String formatDuration(long duration) {
-        long minutes = (duration / 1000) / 60;
-        long seconds = (duration / 1000) % 60;
-        return String.format("%02d:%02d", minutes, seconds);
-    }
-    
-    public String getTrackTitleFromSpotify(String spotifyUrl) {
+
+    private String getTrackTitleFromSpotify(String spotifyUrl) {
         try {
             String trackId = spotifyUrl.split("track/")[1].split("\\?")[0];
             URL url = new URL("https://api.spotify.com/v1/tracks/" + trackId);
@@ -446,7 +334,6 @@ public class Main extends ListenerAdapter {
 
     private String[] getYoutubeStreamUrlAndTitle(String videoUrl) {
         try {
-            // Using yt-dlp to retrieve both audio URL and title
             ProcessBuilder urlBuilder = new ProcessBuilder("yt-dlp", "-f", "bestaudio", "--get-url", videoUrl);
             Process urlProcess = urlBuilder.start();
             BufferedReader urlReader = new BufferedReader(new InputStreamReader(urlProcess.getInputStream()));
@@ -454,16 +341,18 @@ public class Main extends ListenerAdapter {
             int urlExitCode = urlProcess.waitFor();
     
             if (urlExitCode == 0 && streamUrl != null && !streamUrl.isEmpty()) {
-                ProcessBuilder titleBuilder = new ProcessBuilder("yt-dlp", "--get-title", videoUrl);
+                ProcessBuilder titleBuilder = new ProcessBuilder("yt-dlp", "--get-title", "--get-duration", "--get-thumbnail", videoUrl);
                 Process titleProcess = titleBuilder.start();
                 BufferedReader titleReader = new BufferedReader(new InputStreamReader(titleProcess.getInputStream()));
-                String title = titleReader.readLine();
+    
+                // Correction de l'ordre des informations
+                String title = titleReader.readLine();          // Le titre de la vidéo
+                String thumbnailUrl = titleReader.readLine();   // L'URL de la miniature
+                String duration = titleReader.readLine();       // La durée de la vidéo
                 int titleExitCode = titleProcess.waitFor();
     
                 if (titleExitCode == 0 && title != null && !title.isEmpty()) {
-                    String videoId = extractYoutubeVideoId(videoUrl);
-                    String thumbnailUrl = "https://img.youtube.com/vi/" + videoId + "/hqdefault.jpg";
-                    return new String[]{streamUrl, title, thumbnailUrl}; // Include thumbnail URL
+                    return new String[]{streamUrl, title, thumbnailUrl, duration};
                 }
             }
         } catch (IOException | InterruptedException e) {
@@ -474,12 +363,48 @@ public class Main extends ListenerAdapter {
     
 
     public String extractYoutubeVideoId(String url) {
-        String pattern = "(?<=watch\\?v=|youtu.be\\/)[^&]+";
+        String pattern = "(?<=watch\\?v=|youtu.be/|youtube.com/embed/)[^&]+";
         Pattern compiledPattern = Pattern.compile(pattern);
         Matcher matcher = compiledPattern.matcher(url);
         if (matcher.find()) {
             return matcher.group();
         }
         return null;
+    }
+}
+
+class TrackInfo {
+    private final String title;
+    private final String duration;
+    private final String artist;
+    private final String thumbnailUrl;
+    private final String videoUrl;
+
+    public TrackInfo(String title, String duration, String artist, String thumbnailUrl, String videoUrl) {
+        this.title = title;
+        this.duration = duration;
+        this.artist = artist;
+        this.thumbnailUrl = thumbnailUrl;
+        this.videoUrl = videoUrl;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public String getDuration() {
+        return duration;
+    }
+
+    public String getArtist() {
+        return artist;
+    }
+
+    public String getThumbnailUrl() {
+        return thumbnailUrl;
+    }
+
+    public String getVideoUrl() {
+        return videoUrl;
     }
 }

@@ -26,8 +26,6 @@ public class MusicManager {
     }
 
     public void updateScheduler(Guild guild, JDA jda, TextChannel textChannel) {
-        this.scheduler.setGuild(guild);
-        this.scheduler.setJDA(jda);
         this.scheduler.setChannel(textChannel); // Ensure scheduler can update the text channel
     }
 }
