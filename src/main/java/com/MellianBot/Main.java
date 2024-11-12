@@ -28,7 +28,6 @@ import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Base64;
-import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -59,8 +58,8 @@ public class Main extends ListenerAdapter {
 
     // Point d'entrée principal de l'application
     public static void main(String[] args) throws Exception {
-        Properties properties = loadPropertiesFile();
-        String discordToken = properties.getProperty("discord.api.key", "defaultDiscordToken");
+        String discordToken = System.getenv("DISCORD_TOKEN");
+
         
         // Configure le bot Discord avec les permissions et les intentions nécessaires
         JDABuilder builder = JDABuilder.createDefault(discordToken, 
@@ -72,32 +71,15 @@ public class Main extends ListenerAdapter {
         builder.build();
     }
 
-    // Charge les paramètres depuis un fichier de configuration ou utilise les valeurs par défaut
-    private static Properties loadPropertiesFile() {
-        Properties properties = new Properties();
-        try (InputStream input = Main.class.getClassLoader().getResourceAsStream("config.properties")) {
-            if (input != null) properties.load(input);
-            else setDefaultProperties(properties);
-        } catch (IOException ex) {
-            ex.printStackTrace();
-        }
-        return properties;
-    }
-
-    // Définit les paramètres par défaut si aucun fichier de configuration n'est trouvé
-    private static void setDefaultProperties(Properties properties) {
-        properties.setProperty("spotify.client.id", "defaultClientId");
-        properties.setProperty("spotify.client.secret", "defaultClientSecret");
-        properties.setProperty("discord.api.key", "defaultDiscordToken");
-    }
 
     // Charge les informations de configuration pour Spotify
     private void loadProperties() {
-        Properties properties = loadPropertiesFile();
-        this.spotifyClientId = properties.getProperty("spotify.client.id", "defaultClientId");
-        this.spotifyClientSecret = properties.getProperty("spotify.client.secret", "defaultClientSecret");
+        // Récupère les valeurs des variables d'environnement
+        this.spotifyClientId = System.getenv("SPOTIFY_CLIENT_ID");
+        this.spotifyClientSecret = System.getenv("SPOTIFY_CLIENT_SECRET");
         this.spotifyAccessToken = getSpotifyAccessToken();
     }
+    
 
     // Initialise le gestionnaire de source pour Spotify
     private void initializeSpotify() {
