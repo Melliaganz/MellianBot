@@ -19,9 +19,12 @@ import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 
+import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Activity;
+import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.GuildVoiceState;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.concrete.VoiceChannel;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -36,6 +39,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class Main extends ListenerAdapter {
+    private final BotMusicService botMusicService;
     private final AudioPlayerManager playerManager = new DefaultAudioPlayerManager();
     private MusicManager musicManager;
     private static final HttpTransport HTTP_TRANSPORT = new NetHttpTransport();
@@ -59,6 +63,9 @@ public class Main extends ListenerAdapter {
                 .setApplicationName("MellianBot")
                 .build();
         this.youTubeSearcher = new YouTubeSearcher(youTubeService);
+
+        // Initialise BotMusicService avec le service YouTube
+        this.botMusicService = new BotMusicService(youTubeService);
     }
 
     // Point d'entrée principal de l'application
@@ -160,32 +167,35 @@ public class Main extends ListenerAdapter {
     }
 
     // Gère la commande !play pour lire une piste ou une vidéo
-    private void handlePlayCommand(String message, MessageReceivedEvent event) {
+   private void handlePlayCommand(String message, MessageReceivedEvent event) {
+        Guild guild = event.getGuild();
+        TextChannel textChannel = event.getChannel().asTextChannel();
+        JDA jda = event.getJDA();
+
+        MusicManager musicManager = botMusicService.getMusicManager(guild, textChannel, jda);
         String[] parts = message.split(" ", 2);
+
         if (parts.length < 2) {
             event.getChannel().sendMessage("Vous devez fournir un lien ou des mots-clés après la commande !play.").queue();
             return;
         }
-        
+
         String input = parts[1];
         VoiceChannel channel = getUserVoiceChannel(event);
         if (channel == null) return;
-    
-        connectToVoiceChannel(channel, event);
-        if (musicManager == null) initMusicManager(event);
-    
-        // Déterminer si l'input est un lien ou des mots-clés
+
+        connectToVoiceChannel(channel, event, musicManager);
+        
         if (input.startsWith("https://open.spotify.com/")) {
-            playSpotifyTrack(input, event);
+            playSpotifyTrack(input, event, musicManager);
         } else if (input.startsWith("http://") || input.startsWith("https://www.youtube.com") || input.startsWith("https://youtu.be")) {
-            playYouTubeTrack(input, event);
+            playYouTubeTrack(input, event, musicManager);
         } else {
-            // Si ce n'est pas un lien, considérer que ce sont des mots-clés pour rechercher une vidéo sur YouTube
-            searchAndPlayYouTubeTrack(input, event);
+            searchAndPlayYouTubeTrack(input, event, musicManager);
         }
     }
     
-    private void searchAndPlayYouTubeTrack(String keywords, MessageReceivedEvent event) {
+    private void searchAndPlayYouTubeTrack(String keywords, MessageReceivedEvent event, MusicManager musicManager) {
         String youtubeUrl = youTubeSearcher.searchYoutube(keywords, musicManager, event.getChannel());
         if (youtubeUrl != null) {
             // Charger la vidéo trouvée dans le gestionnaire de musique
@@ -196,7 +206,7 @@ public class Main extends ListenerAdapter {
     }
     
     // Lit une piste Spotify en recherchant une vidéo YouTube correspondante
-    private void playSpotifyTrack(String spotifyUrl, MessageReceivedEvent event) {
+    private void playSpotifyTrack(String spotifyUrl, MessageReceivedEvent event, MusicManager musicManager) {
         String spotifyTrackTitle = getTrackTitleFromSpotify(spotifyUrl);
         if (spotifyTrackTitle == null) {
             event.getChannel().sendMessage("Impossible de récupérer les informations de la piste Spotify.").queue();
@@ -211,7 +221,7 @@ public class Main extends ListenerAdapter {
     }
 
     // Lit une vidéo YouTube en fonction de l'URL fournie
-    private void playYouTubeTrack(String youtubeUrl, MessageReceivedEvent event) {
+    private void playYouTubeTrack(String youtubeUrl, MessageReceivedEvent event, MusicManager musicManager) {
         handleYouTubeLoad(youtubeUrl, event);
     }
 
@@ -223,10 +233,11 @@ public class Main extends ListenerAdapter {
     }
 
     // Connecte le bot au canal vocal spécifié
-    private void connectToVoiceChannel(VoiceChannel channel, MessageReceivedEvent event) {
+    private void connectToVoiceChannel(VoiceChannel channel, MessageReceivedEvent event, MusicManager musicManager) {
         if (!event.getGuild().getAudioManager().isConnected()) {
             event.getGuild().getAudioManager().openAudioConnection(channel);
             System.out.println("Bot connecté au canal vocal : " + channel.getName());
+            event.getGuild().getAudioManager().setSendingHandler(new AudioPlayerSendHandler(musicManager.getPlayer()));
         } else {
             System.out.println("Bot déjà connecté à un canal vocal.");
         }
@@ -240,32 +251,46 @@ public class Main extends ListenerAdapter {
 
     // Commandes pour contrôler la musique (pause, reprise, saut, arrêt, etc.)
     private void handlePauseCommand(MessageReceivedEvent event) {
-        if (musicManager != null) {
-            musicManager.getScheduler().pauseTrack();
-            event.getChannel().sendMessage("Lecture mise en pause.").queue();
-        }
+        Guild guild = event.getGuild();
+        TextChannel textChannel = event.getChannel().asTextChannel();
+        JDA jda = event.getJDA();
+        MusicManager musicManager = botMusicService.getMusicManager(guild, textChannel, jda);
+    
+        musicManager.getScheduler().pauseTrack();
+        event.getChannel().sendMessage("Lecture mise en pause.").queue();
     }
+    
 
     private void handleResumeCommand(MessageReceivedEvent event) {
-        if (musicManager != null) {
-            musicManager.getScheduler().resumeTrack();
-            event.getChannel().sendMessage("Lecture reprise.").queue();
-        }
+        Guild guild = event.getGuild();
+        TextChannel textChannel = event.getChannel().asTextChannel();
+        JDA jda = event.getJDA();
+        MusicManager musicManager = botMusicService.getMusicManager(guild, textChannel, jda);
+    
+        musicManager.getScheduler().resumeTrack();
+        event.getChannel().sendMessage("Lecture reprise.").queue();
     }
-
+    
     private void handleSkipCommand(MessageReceivedEvent event) {
-        if (musicManager != null) {
-            musicManager.getScheduler().skipTrack();
-            event.getChannel().sendMessage("Piste sautée.").queue();
-        }
+        Guild guild = event.getGuild();
+        TextChannel textChannel = event.getChannel().asTextChannel();
+        JDA jda = event.getJDA();
+        MusicManager musicManager = botMusicService.getMusicManager(guild, textChannel, jda);
+    
+        musicManager.getScheduler().skipTrack();
+        event.getChannel().sendMessage("Piste sautée.").queue();
     }
-
+    
     private void handleStopCommand(MessageReceivedEvent event) {
-        if (musicManager != null) {
-            musicManager.getScheduler().stopTrack();
-            event.getChannel().sendMessage("Lecture arrêtée et file d'attente vidée.").queue();
-        }
+        Guild guild = event.getGuild();
+        TextChannel textChannel = event.getChannel().asTextChannel();
+        JDA jda = event.getJDA();
+        MusicManager musicManager = botMusicService.getMusicManager(guild, textChannel, jda);
+    
+        musicManager.getScheduler().stopTrack();
+        event.getChannel().sendMessage("Lecture arrêtée et file d'attente vidée.").queue();
     }
+    
 
     private void handleClearCommand(MessageReceivedEvent event) {
         if (musicManager != null) {
