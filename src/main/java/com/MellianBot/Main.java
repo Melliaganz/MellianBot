@@ -16,6 +16,8 @@ import com.sedmelluq.discord.lavaplayer.source.AudioSourceManagers;
 import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
+
+import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.entities.GuildVoiceState;
@@ -41,11 +43,13 @@ public class Main extends ListenerAdapter {
     private String spotifyClientId;
     private String spotifyClientSecret;
     private String spotifyAccessToken;
+    private static Dotenv dotenv;
+
 
     // Constructeur : initialise les configurations et les sources d'audio
     public Main() {
-        loadProperties(); // Charge les informations de configuration
-        initializeSpotify(); // Initialise Spotify avec les informations d'identification
+        loadProperties();
+        initializeSpotify(); 
         AudioSourceManagers.registerRemoteSources(playerManager);
         AudioSourceManagers.registerLocalSource(playerManager);
         
@@ -58,10 +62,15 @@ public class Main extends ListenerAdapter {
 
     // Point d'entrée principal de l'application
     public static void main(String[] args) throws Exception {
-        String discordToken = System.getenv("DISCORD_TOKEN");
-
-        
-        // Configure le bot Discord avec les permissions et les intentions nécessaires
+        dotenv = Dotenv.configure()
+                .directory("src/main/resources")
+                .filename(".env")
+                .load();
+        String discordToken = dotenv.get("DISCORD_TOKEN");
+        if (discordToken == null || discordToken.isEmpty()) {
+            throw new IllegalArgumentException("Le token Discord est manquant. Assurez-vous que la variable d'environnement DISCORD_TOKEN est définie.");
+        }
+    
         JDABuilder builder = JDABuilder.createDefault(discordToken, 
             GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT,
             GatewayIntent.GUILD_VOICE_STATES, GatewayIntent.GUILD_EMOJIS_AND_STICKERS,
@@ -70,15 +79,25 @@ public class Main extends ListenerAdapter {
         builder.addEventListeners(new Main());
         builder.build();
     }
+    
 
 
     // Charge les informations de configuration pour Spotify
     private void loadProperties() {
-        // Récupère les valeurs des variables d'environnement
-        this.spotifyClientId = System.getenv("SPOTIFY_CLIENT_ID");
-        this.spotifyClientSecret = System.getenv("SPOTIFY_CLIENT_SECRET");
+        this.spotifyClientId = dotenv.get("SPOTIFY_CLIENT_ID");
+        this.spotifyClientSecret = dotenv.get("SPOTIFY_CLIENT_SECRET");
+
+        System.out.println("SPOTIFY_CLIENT_ID récupéré : " + (spotifyClientId != null ? "Oui" : "Non"));
+        System.out.println("SPOTIFY_CLIENT_SECRET récupéré : " + (spotifyClientSecret != null ? "Oui" : "Non"));
+
+        if (spotifyClientId == null || spotifyClientId.isEmpty() || spotifyClientSecret == null || spotifyClientSecret.isEmpty()) {
+            throw new IllegalArgumentException("Les identifiants Spotify (SPOTIFY_CLIENT_ID ou SPOTIFY_CLIENT_SECRET) sont manquants. Assurez-vous que les variables d'environnement sont définies.");
+        }
+
         this.spotifyAccessToken = getSpotifyAccessToken();
     }
+    
+    
     
 
     // Initialise le gestionnaire de source pour Spotify
@@ -96,8 +115,14 @@ public class Main extends ListenerAdapter {
 
     // Récupère un token d'accès Spotify en effectuant une requête d'authentification
     public String getSpotifyAccessToken() {
+        if (spotifyClientId == null || spotifyClientSecret == null) {
+            System.out.println("Client ID ou Secret Spotify est manquant.");
+            return null;
+        }
+    
         String auth = spotifyClientId + ":" + spotifyClientSecret;
         String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
+        
         for (int retryCount = 0; retryCount < 3; retryCount++) {
             try {
                 URL url = new URL("https://accounts.spotify.com/api/token");
@@ -109,7 +134,10 @@ public class Main extends ListenerAdapter {
                 try (OutputStream os = conn.getOutputStream()) {
                     os.write("grant_type=client_credentials".getBytes("utf-8"));
                 }
-                if (conn.getResponseCode() == 200) {
+                int responseCode = conn.getResponseCode();
+                System.out.println("Code de réponse Spotify : " + responseCode);
+    
+                if (responseCode == 200) {
                     BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "utf-8"));
                     StringBuilder response = new StringBuilder();
                     String responseLine;
@@ -117,7 +145,7 @@ public class Main extends ListenerAdapter {
                     JsonObject jsonObject = JsonParser.parseString(response.toString()).getAsJsonObject();
                     return jsonObject.get("access_token").getAsString();
                 } else {
-                    System.out.println("Erreur : Code de réponse Spotify " + conn.getResponseCode());
+                    System.out.println("Erreur : Code de réponse Spotify " + responseCode);
                 }
             } catch (IOException e) {
                 e.printStackTrace();
@@ -127,6 +155,7 @@ public class Main extends ListenerAdapter {
         System.out.println("Échec de l'obtention du token d'accès Spotify après plusieurs tentatives.");
         return null;
     }
+    
 
     // Gère les commandes reçues dans les messages Discord
     @Override
