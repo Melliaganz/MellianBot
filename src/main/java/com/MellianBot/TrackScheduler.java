@@ -12,7 +12,6 @@ import com.sedmelluq.discord.lavaplayer.track.AudioTrackEndReason;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
-import net.dv8tion.jda.api.entities.channel.unions.MessageChannelUnion;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.entities.Activity;
 import java.util.concurrent.LinkedBlockingDeque;
@@ -23,14 +22,12 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 // Classe principale pour gérer les pistes audio et leurs événements
 public class TrackScheduler extends AudioEventAdapter {
     private final AudioPlayer player; // Gestionnaire de lecture audio
     private final Deque<AudioTrack> queue; // File d'attente des pistes audio
     private TextChannel textChannel; // Canal texte pour les messages de statut
-    private AudioTrack currentTrack; // Piste audio actuellement en lecture
     private boolean looping = false; // Indicateur de boucle sur la piste actuelle
     private final YouTube youTubeService; // Service YouTube pour récupérer les infos de la vidéo
     private final JDA jda; // Instance JDA pour mettre à jour l'activité du bot
@@ -83,7 +80,6 @@ public class TrackScheduler extends AudioEventAdapter {
 
     // Met à jour la piste actuelle et les informations liées
     private void setCurrentTrack(AudioTrack track) {
-        currentTrack = track;
         updateTrackInfo(track); // Récupère les informations depuis YouTube
         updateBotActivity(track); // Change l'activité du bot pour afficher la piste
         sendNowPlayingMessage(track); // Envoie le message "En cours de lecture"
@@ -271,11 +267,6 @@ public class TrackScheduler extends AudioEventAdapter {
         textChannel.sendMessageEmbeds(embedBuilder.build()).queue();
     }
 
-    // Retourne le titre de la piste
-    private String getTrackTitle(AudioTrack track) {
-        TrackInfo info = (TrackInfo) track.getUserData();
-        return info != null ? info.getTitle() : track.getInfo().title;
-    }
 
     // Envoie un message texte sur le canal texte
     private void sendMessage(String message) {

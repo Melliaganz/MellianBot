@@ -298,18 +298,23 @@ public class Main extends ListenerAdapter {
     
 
     private void handleQueueCommand(MessageReceivedEvent event) {
+        if (!event.isFromGuild()) {
+            event.getChannel().sendMessage("Cette commande n'est disponible que dans les serveurs.").queue();
+            return;
+        }
+        
         Guild guild = event.getGuild();
-        TextChannel textChannel = event.getChannel().asTextChannel(); // Conversion explicite en TextChannel
+        TextChannel textChannel = event.getChannel().asTextChannel();
         JDA jda = event.getJDA();
         MusicManager musicManager = botMusicService.getMusicManager(guild, textChannel, jda);
         
-        // Affiche la file d'attente
         if (musicManager != null) {
             musicManager.getScheduler().showQueue(textChannel);
         } else {
             textChannel.sendMessage("Aucune file d'attente trouvée pour ce serveur.").queue();
         }
     }
+    
     
     private void handleCurrentCommand(MessageReceivedEvent event) {
         Guild guild = event.getGuild();
