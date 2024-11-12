@@ -244,10 +244,10 @@ public class Main extends ListenerAdapter {
     }
 
     // Initialise le gestionnaire de musique pour le serveur Discord
-    private void initMusicManager(MessageReceivedEvent event) {
-        this.musicManager = new MusicManager(playerManager, event.getGuild(), event.getJDA(), event.getChannel().asTextChannel(), youTubeService);
-        event.getGuild().getAudioManager().setSendingHandler(new AudioPlayerSendHandler(musicManager.getPlayer()));
-    }
+    // private void initMusicManager(MessageReceivedEvent event) {
+    //     this.musicManager = new MusicManager(playerManager, event.getGuild(), event.getJDA(), event.getChannel().asTextChannel(), youTubeService);
+    //     event.getGuild().getAudioManager().setSendingHandler(new AudioPlayerSendHandler(musicManager.getPlayer()));
+    // }
 
     // Commandes pour contrôler la musique (pause, reprise, saut, arrêt, etc.)
     private void handlePauseCommand(MessageReceivedEvent event) {
@@ -364,33 +364,39 @@ public class Main extends ListenerAdapter {
 
     // Gère le chargement d'une piste audio dans le gestionnaire de musique
     private void handleAudioLoadResult(String streamUrl, TrackInfo trackInfo, MessageReceivedEvent event) {
+        Guild guild = event.getGuild();
+        TextChannel textChannel = event.getChannel().asTextChannel();
+        JDA jda = event.getJDA();
+        MusicManager musicManager = botMusicService.getMusicManager(guild, textChannel, jda); // Récupère le bon MusicManager
+        
         playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
             @Override
             public void trackLoaded(AudioTrack track) {
                 track.setUserData(trackInfo);
                 event.getChannel().sendMessage("Ajouté à la file d'attente : " + trackInfo.getTitle()).queue();
-                musicManager.getScheduler().queueTrack(track);
+                musicManager.getScheduler().queueTrack(track); // Utilise le bon MusicManager ici
             }
-
+    
             @Override
             public void playlistLoaded(AudioPlaylist playlist) {
                 event.getChannel().sendMessage("Playlist détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
                 for (AudioTrack track : playlist.getTracks()) {
-                    musicManager.getScheduler().queueTrack(track);
+                    musicManager.getScheduler().queueTrack(track); // Utilise le bon MusicManager ici
                 }
             }
-
+    
             @Override
             public void noMatches() {
                 event.getChannel().sendMessage("Aucune piste trouvée.").queue();
             }
-
+    
             @Override
             public void loadFailed(FriendlyException exception) {
                 event.getChannel().sendMessage("Erreur lors du chargement de la piste : " + exception.getMessage()).queue();
             }
         });
     }
+    
 
     // Récupère le titre de la piste depuis un lien Spotify
     private String getTrackTitleFromSpotify(String spotifyUrl) {
