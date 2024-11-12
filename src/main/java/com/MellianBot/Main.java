@@ -266,7 +266,7 @@ public class Main extends ListenerAdapter {
                             public void trackLoaded(AudioTrack track) {
                                 track.setUserData(trackInfo);
                                 event.getChannel().sendMessage("Ajouté en priorité à la file d'attente : " + trackInfo.getTitle()).queue();
-                                musicManager.getScheduler().queueFirst(track);
+                                musicManager.getScheduler().queueTrackAtFirst(track);
                             }
         
                             @Override
@@ -275,7 +275,7 @@ public class Main extends ListenerAdapter {
                                 if (!playlist.getTracks().isEmpty()) {
                                     AudioTrack track = playlist.getTracks().get(0);
                                     track.setUserData(trackInfo);
-                                    musicManager.getScheduler().queueFirst(track);
+                                    musicManager.getScheduler().queueTrackAtFirst(track);
                                 }
                             }
         
@@ -354,14 +354,14 @@ public class Main extends ListenerAdapter {
             public void trackLoaded(AudioTrack track) {
                 track.setUserData(trackInfo);
                 event.getChannel().sendMessage("Ajouté à la file d'attente : " + trackInfo.getTitle()).queue();
-                musicManager.getScheduler().queue(track);
+                musicManager.getScheduler().queueTrack(track);
             }
 
             @Override
             public void playlistLoaded(AudioPlaylist playlist) {
                 event.getChannel().sendMessage("Playlist détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
                 for (AudioTrack track : playlist.getTracks()) {
-                    musicManager.getScheduler().queue(track);
+                    musicManager.getScheduler().queueTrack(track);
                 }
             }
 
