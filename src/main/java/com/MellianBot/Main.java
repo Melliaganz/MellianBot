@@ -453,7 +453,7 @@ private TrackInfo getYoutubeVideoInfo(String videoId) {
         Video video = response.getItems().get(0);
         String title = video.getSnippet().getTitle();
         String artist = video.getSnippet().getChannelTitle();
-        String thumbnailUrl = video.getSnippet().getThumbnails().getDefault().getUrl();
+        String thumbnailUrl = video.getSnippet().getThumbnails().getHigh().getUrl();
         String duration = formatDuration(video.getContentDetails().getDuration());
 
         return new TrackInfo(title, duration, artist, thumbnailUrl, "https://www.youtube.com/watch?v=" + videoId);
@@ -462,6 +462,7 @@ private TrackInfo getYoutubeVideoInfo(String videoId) {
         return TrackInfo.getDefaultInfo();
     }
 }
+
 
 // Formater la durée ISO 8601 en minutes:secondes
 private String formatDuration(String isoDuration) {
