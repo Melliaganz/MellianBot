@@ -6,6 +6,8 @@ import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.gson.GsonFactory;
 import com.google.api.services.youtube.YouTube;
+import com.google.api.services.youtube.model.Video;
+import com.google.api.services.youtube.model.VideoListResponse;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.sedmelluq.discord.lavaplayer.player.AudioLoadResultHandler;
@@ -28,6 +30,7 @@ import net.dv8tion.jda.api.requests.GatewayIntent;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -385,47 +388,85 @@ public class Main extends ListenerAdapter {
     }
 
     // Utilise yt-dlp pour obtenir le flux audio, le titre, la durée, et la miniature de la vidéo YouTube
-    private String[] getYoutubeStreamUrlAndTitle(String videoUrl) {
-        try {
-            ProcessBuilder urlBuilder = new ProcessBuilder("yt-dlp", "-f", "bestaudio", "--get-url", "--geo-bypass", videoUrl);
-            Process urlProcess = urlBuilder.start();
-            BufferedReader urlReader = new BufferedReader(new InputStreamReader(urlProcess.getInputStream()));
-            String streamUrl = urlReader.readLine();
-            System.out.println("URL du flux audio obtenue : " + streamUrl);
-    
-            int urlExitCode = urlProcess.waitFor();
-            if (urlExitCode != 0 || streamUrl == null) {
-                BufferedReader errorReader = new BufferedReader(new InputStreamReader(urlProcess.getErrorStream()));
-                StringBuilder errorOutput = new StringBuilder();
-                String line;
-                while ((line = errorReader.readLine()) != null) {
-                    errorOutput.append(line).append("\n");
-                }
-                System.err.println("Erreur yt-dlp : " + errorOutput);
-                return null;
-            }
-    
-            // Assigne des valeurs par défaut si d'autres informations ne sont pas disponibles
-            String title = "Titre inconnu";
-            String thumbnailUrl = "https://via.placeholder.com/150";
-            String duration = "Durée inconnue";
-    
-            return new String[]{streamUrl, title, thumbnailUrl, duration};
-        } catch (IOException | InterruptedException e) {
-            e.printStackTrace();
-        }
-        return null;
-    }
-    
-    
-    
+private String[] getYoutubeStreamUrlAndTitle(String videoUrl) {
+    try {
+        // Extraire l'URL du flux audio
+        ProcessBuilder urlBuilder = new ProcessBuilder("yt-dlp", "-f", "bestaudio", "--get-url", "--geo-bypass", videoUrl);
+        Process urlProcess = urlBuilder.start();
+        BufferedReader urlReader = new BufferedReader(new InputStreamReader(urlProcess.getInputStream()));
+        String streamUrl = urlReader.readLine();
+        System.out.println("URL du flux audio obtenue : " + streamUrl);
 
-    // Extrait l'ID de la vidéo depuis une URL YouTube
-    public String extractYoutubeVideoId(String url) {
-        String pattern = "(?<=watch\\?v=|youtu.be/|youtube.com/embed/)[^&]+";
-        Pattern compiledPattern = Pattern.compile(pattern);
-        Matcher matcher = compiledPattern.matcher(url);
-        if (matcher.find()) return matcher.group();
-        return null;
+        int urlExitCode = urlProcess.waitFor();
+        if (urlExitCode != 0 || streamUrl == null) {
+            BufferedReader errorReader = new BufferedReader(new InputStreamReader(urlProcess.getErrorStream()));
+            StringBuilder errorOutput = new StringBuilder();
+            String line;
+            while ((line = errorReader.readLine()) != null) {
+                errorOutput.append(line).append("\n");
+            }
+            System.err.println("Erreur yt-dlp : " + errorOutput);
+            return null;
+        }
+
+        // Extraire l'ID de la vidéo
+        String videoId = extractYoutubeVideoId(videoUrl);
+        if (videoId == null) {
+            System.err.println("Impossible d'extraire l'ID de la vidéo.");
+            return new String[]{streamUrl, "Titre inconnu", "https://via.placeholder.com/150", "Durée inconnue"};
+        }
+
+        // Récupérer les informations de la vidéo via l'API YouTube
+        TrackInfo videoInfo = getYoutubeVideoInfo(videoId);
+
+        return new String[]{
+            streamUrl,
+            videoInfo.getTitle(),
+            videoInfo.getThumbnailUrl(),
+            videoInfo.getDuration()
+        };
+    } catch (IOException | InterruptedException e) {
+        e.printStackTrace();
     }
+    return null;
+}
+
+// Méthode pour extraire l'ID de la vidéo
+private String extractYoutubeVideoId(String url) {
+    Matcher matcher = Pattern.compile("(?<=watch\\?v=|youtu\\.be/|youtube\\.com/embed/)[^&]+").matcher(url);
+    return matcher.find() ? matcher.group() : null;
+}
+
+// Méthode pour récupérer les informations de la vidéo via l'API YouTube
+private TrackInfo getYoutubeVideoInfo(String videoId) {
+    try {
+        YouTube.Videos.List request = youTubeService.videos().list("snippet,contentDetails");
+        request.setId(videoId);
+        request.setKey(System.getenv("YOUTUBE_API_KEY"));
+        request.setFields("items(snippet(title, channelTitle, thumbnails), contentDetails(duration))");
+
+        VideoListResponse response = request.execute();
+        if (response.getItems().isEmpty()) {
+            return TrackInfo.getDefaultInfo();
+        }
+
+        Video video = response.getItems().get(0);
+        String title = video.getSnippet().getTitle();
+        String artist = video.getSnippet().getChannelTitle();
+        String thumbnailUrl = video.getSnippet().getThumbnails().getDefault().getUrl();
+        String duration = formatDuration(video.getContentDetails().getDuration());
+
+        return new TrackInfo(title, duration, artist, thumbnailUrl, "https://www.youtube.com/watch?v=" + videoId);
+    } catch (IOException e) {
+        e.printStackTrace();
+        return TrackInfo.getDefaultInfo();
+    }
+}
+
+// Formater la durée ISO 8601 en minutes:secondes
+private String formatDuration(String isoDuration) {
+    Duration duration = Duration.parse(isoDuration);
+    return String.format("%d:%02d", duration.toMinutes(), duration.minusMinutes(duration.toMinutes()).getSeconds());
+}
+
 }
