@@ -386,31 +386,42 @@ public class Main extends ListenerAdapter {
     // Utilise yt-dlp pour obtenir le flux audio, le titre, la durée, et la miniature de la vidéo YouTube
     private String[] getYoutubeStreamUrlAndTitle(String videoUrl) {
         try {
-            ProcessBuilder urlBuilder = new ProcessBuilder("yt-dlp", "-f", "bestaudio", "--get-url", videoUrl);
+            ProcessBuilder urlBuilder = new ProcessBuilder("yt-dlp", "-f", "bestaudio", "--get-url", "--geo-bypass", "--force-generic-extractor", videoUrl);
             Process urlProcess = urlBuilder.start();
             BufferedReader urlReader = new BufferedReader(new InputStreamReader(urlProcess.getInputStream()));
             String streamUrl = urlReader.readLine();
+    
+            // Log de la sortie de yt-dlp pour le débogage
+            if (streamUrl != null) {
+                System.out.println("URL du flux audio obtenue : " + streamUrl);
+            } else {
+                System.err.println("yt-dlp n'a retourné aucun flux audio.");
+            }
+    
+            // Vérifie les erreurs de yt-dlp
+            BufferedReader errorReader = new BufferedReader(new InputStreamReader(urlProcess.getErrorStream()));
+            StringBuilder errorOutput = new StringBuilder();
+            String line;
+            while ((line = errorReader.readLine()) != null) {
+                errorOutput.append(line).append("\n");
+            }
+            System.err.println("Erreur yt-dlp : " + errorOutput);
+    
             int urlExitCode = urlProcess.waitFor();
-
-            if (urlExitCode == 0 && streamUrl != null && !streamUrl.isEmpty()) {
-                ProcessBuilder titleBuilder = new ProcessBuilder("yt-dlp", "--get-title", "--get-duration", "--get-thumbnail", videoUrl);
-                Process titleProcess = titleBuilder.start();
-                BufferedReader titleReader = new BufferedReader(new InputStreamReader(titleProcess.getInputStream()));
-
-                String title = titleReader.readLine();
-                String thumbnailUrl = titleReader.readLine();
-                String duration = titleReader.readLine();
-                int titleExitCode = titleProcess.waitFor();
-
-                if (titleExitCode == 0 && title != null && !title.isEmpty()) {
-                    return new String[]{streamUrl, title, thumbnailUrl, duration};
-                }
+            if (urlExitCode != 0) {
+                return null;
+            }
+    
+            if (streamUrl != null && !streamUrl.isEmpty()) {
+                return new String[]{streamUrl};
             }
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
         }
         return null;
     }
+    
+    
 
     // Extrait l'ID de la vidéo depuis une URL YouTube
     public String extractYoutubeVideoId(String url) {
