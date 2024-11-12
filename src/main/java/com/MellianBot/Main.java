@@ -311,24 +311,25 @@ public class Main extends ListenerAdapter {
     // Traite le chargement des informations YouTube et ajoute les informations de la piste dans la file d'attente
     private void handleYouTubeLoad(String youtubeUrl, MessageReceivedEvent event) {
         String[] streamData = getYoutubeStreamUrlAndTitle(youtubeUrl);
-        if (streamData != null) {
-            String streamUrl = streamData[0];
-            String title = streamData[1];
-            String duration = streamData[3];
-            String videoId = extractYoutubeVideoId(youtubeUrl);
-            String thumbnailUrl = "https://img.youtube.com/vi/" + videoId + "/hqdefault.jpg";
-            String videoUrl = youtubeUrl;
-    
-            // Récupère les informations de l'artiste pour la vidéo YouTube
-            TrackInfo videoInfo = musicManager.getScheduler().getYoutubeVideoInfo(videoId);
-            String artist = videoInfo.getArtist(); 
-
-            TrackInfo trackInfo = new TrackInfo(title, duration, artist, thumbnailUrl, videoUrl);
-            handleAudioLoadResult(streamUrl, trackInfo, event);
-        } else {
+        
+        // Vérifie que streamData contient les données attendues
+        if (streamData == null || streamData.length < 1 || streamData[0] == null) {
             event.getChannel().sendMessage("Erreur lors de la récupération du flux audio avec yt-dlp.").queue();
+            return;
         }
+        
+        String streamUrl = streamData[0];
+        String title = (streamData.length > 1 && streamData[1] != null) ? streamData[1] : "Titre inconnu";
+        String duration = (streamData.length > 3 && streamData[3] != null) ? streamData[3] : "Durée inconnue";
+        String thumbnailUrl = (streamData.length > 2 && streamData[2] != null) ? streamData[2] : "https://via.placeholder.com/150";
+        String videoUrl = youtubeUrl;
+        
+        // Crée un objet TrackInfo pour stocker les informations
+        TrackInfo trackInfo = new TrackInfo(title, duration, "Artiste inconnu", thumbnailUrl, videoUrl);
+        
+        handleAudioLoadResult(streamUrl, trackInfo, event);
     }
+    
 
     // Gère le chargement d'une piste audio dans le gestionnaire de musique
     private void handleAudioLoadResult(String streamUrl, TrackInfo trackInfo, MessageReceivedEvent event) {
@@ -386,40 +387,36 @@ public class Main extends ListenerAdapter {
     // Utilise yt-dlp pour obtenir le flux audio, le titre, la durée, et la miniature de la vidéo YouTube
     private String[] getYoutubeStreamUrlAndTitle(String videoUrl) {
         try {
-            ProcessBuilder urlBuilder = new ProcessBuilder("yt-dlp", "-f", "bestaudio", "--get-url", "--geo-bypass", "--force-generic-extractor", videoUrl);
+            ProcessBuilder urlBuilder = new ProcessBuilder("yt-dlp", "-f", "bestaudio", "--get-url", "--geo-bypass", videoUrl);
             Process urlProcess = urlBuilder.start();
             BufferedReader urlReader = new BufferedReader(new InputStreamReader(urlProcess.getInputStream()));
             String streamUrl = urlReader.readLine();
-    
-            // Log de la sortie de yt-dlp pour le débogage
-            if (streamUrl != null) {
-                System.out.println("URL du flux audio obtenue : " + streamUrl);
-            } else {
-                System.err.println("yt-dlp n'a retourné aucun flux audio.");
-            }
-    
-            // Vérifie les erreurs de yt-dlp
-            BufferedReader errorReader = new BufferedReader(new InputStreamReader(urlProcess.getErrorStream()));
-            StringBuilder errorOutput = new StringBuilder();
-            String line;
-            while ((line = errorReader.readLine()) != null) {
-                errorOutput.append(line).append("\n");
-            }
-            System.err.println("Erreur yt-dlp : " + errorOutput);
+            System.out.println("URL du flux audio obtenue : " + streamUrl);
     
             int urlExitCode = urlProcess.waitFor();
-            if (urlExitCode != 0) {
+            if (urlExitCode != 0 || streamUrl == null) {
+                BufferedReader errorReader = new BufferedReader(new InputStreamReader(urlProcess.getErrorStream()));
+                StringBuilder errorOutput = new StringBuilder();
+                String line;
+                while ((line = errorReader.readLine()) != null) {
+                    errorOutput.append(line).append("\n");
+                }
+                System.err.println("Erreur yt-dlp : " + errorOutput);
                 return null;
             }
     
-            if (streamUrl != null && !streamUrl.isEmpty()) {
-                return new String[]{streamUrl};
-            }
+            // Assigne des valeurs par défaut si d'autres informations ne sont pas disponibles
+            String title = "Titre inconnu";
+            String thumbnailUrl = "https://via.placeholder.com/150";
+            String duration = "Durée inconnue";
+    
+            return new String[]{streamUrl, title, thumbnailUrl, duration};
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
         }
         return null;
     }
+    
     
     
 
