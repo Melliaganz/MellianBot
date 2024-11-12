@@ -243,12 +243,6 @@ public class Main extends ListenerAdapter {
         }
     }
 
-    // Initialise le gestionnaire de musique pour le serveur Discord
-    // private void initMusicManager(MessageReceivedEvent event) {
-    //     this.musicManager = new MusicManager(playerManager, event.getGuild(), event.getJDA(), event.getChannel().asTextChannel(), youTubeService);
-    //     event.getGuild().getAudioManager().setSendingHandler(new AudioPlayerSendHandler(musicManager.getPlayer()));
-    // }
-
     // Commandes pour contrôler la musique (pause, reprise, saut, arrêt, etc.)
     private void handlePauseCommand(MessageReceivedEvent event) {
         Guild guild = event.getGuild();
@@ -304,16 +298,33 @@ public class Main extends ListenerAdapter {
     
 
     private void handleQueueCommand(MessageReceivedEvent event) {
+        Guild guild = event.getGuild();
+        TextChannel textChannel = event.getChannel().asTextChannel(); // Conversion explicite en TextChannel
+        JDA jda = event.getJDA();
+        MusicManager musicManager = botMusicService.getMusicManager(guild, textChannel, jda);
+        
+        // Affiche la file d'attente
         if (musicManager != null) {
-            musicManager.getScheduler().showQueue();
+            musicManager.getScheduler().showQueue(textChannel);
+        } else {
+            textChannel.sendMessage("Aucune file d'attente trouvée pour ce serveur.").queue();
         }
     }
-
+    
     private void handleCurrentCommand(MessageReceivedEvent event) {
+        Guild guild = event.getGuild();
+        TextChannel textChannel = event.getChannel().asTextChannel(); // Conversion explicite en TextChannel
+        JDA jda = event.getJDA();
+        MusicManager musicManager = botMusicService.getMusicManager(guild, textChannel, jda);
+    
         if (musicManager != null) {
-            musicManager.getScheduler().showCurrentTrack(event.getChannel());
+            musicManager.getScheduler().showCurrentTrack(textChannel);
+        } else {
+            textChannel.sendMessage("Aucune piste en cours de lecture.").queue();
         }
     }
+    
+    
 
     private void handleLoopCommand(MessageReceivedEvent event) {
         if (musicManager != null) {

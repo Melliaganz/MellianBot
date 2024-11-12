@@ -122,26 +122,51 @@ public class TrackScheduler extends AudioEventAdapter {
     }
 
     // Affiche les pistes en file d'attente
-    public void showQueue() {
+    public void showQueue(TextChannel channel) {
         if (queue.isEmpty()) {
-            sendMessage("La file d'attente est vide.");
-        } else {
-            String queueMessage = "File d'attente :\n" + queue.stream()
-                .map(track -> "- " + getTrackTitle(track))
-                .collect(Collectors.joining("\n"));
-            sendMessage(queueMessage);
+            channel.sendMessage("La file d'attente est vide.").queue();
+            return;
         }
+    
+        StringBuilder queueMessage = new StringBuilder("**File d'attente :**\n");
+        int index = 1;
+        for (AudioTrack track : queue) {
+            TrackInfo info = (TrackInfo) track.getUserData();
+            queueMessage.append(index++).append(". ")
+                        .append(info != null ? info.getTitle() : track.getInfo().title)
+                        .append(" - ")
+                        .append(info != null ? info.getArtist() : "Inconnu")
+                        .append("\n");
+            
+            if (index > 10) { // Limiter l'affichage à 10 pistes
+                queueMessage.append("...et plus");
+                break;
+            }
+        }
+        channel.sendMessage(queueMessage.toString()).queue();
     }
+    
+    
+    
 
     // Affiche la piste actuellement en cours de lecture
-    public void showCurrentTrack(MessageChannelUnion messageChannelUnion) {
-        if (currentTrack != null) {
-            sendNowPlayingMessage(currentTrack);
+    public void showCurrentTrack(TextChannel channel) {
+        AudioTrack currentTrack = player.getPlayingTrack();
+        if (currentTrack == null) {
+            channel.sendMessage("Aucune piste en cours de lecture.").queue();
         } else {
-            sendMessage("Aucune piste n'est actuellement en cours de lecture.");
+            TrackInfo info = (TrackInfo) currentTrack.getUserData();
+            EmbedBuilder embed = new EmbedBuilder()
+                .setTitle("En cours de lecture", info.getVideoUrl())
+                .setDescription("**Titre :** " + info.getTitle() + "\n**Artiste/Chaine :** " + info.getArtist() + "\n**Durée :** " + info.getDuration())
+                .setThumbnail(info.getThumbnailUrl())
+                .setColor(Color.BLUE);
+    
+            channel.sendMessageEmbeds(embed.build()).queue();
         }
     }
-
+  
+        
     // Gère la fin de piste en fonction du mode boucle
     @Override
     public void onTrackEnd(AudioPlayer player, AudioTrack track, AudioTrackEndReason endReason) {
