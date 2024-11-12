@@ -314,24 +314,23 @@ public class Main extends ListenerAdapter {
     // Traite le chargement des informations YouTube et ajoute les informations de la piste dans la file d'attente
     private void handleYouTubeLoad(String youtubeUrl, MessageReceivedEvent event) {
         String[] streamData = getYoutubeStreamUrlAndTitle(youtubeUrl);
-        
-        // Vérifie que streamData contient les données attendues
+    
         if (streamData == null || streamData.length < 1 || streamData[0] == null) {
             event.getChannel().sendMessage("Erreur lors de la récupération du flux audio avec yt-dlp.").queue();
             return;
         }
-        
+    
         String streamUrl = streamData[0];
-        String title = (streamData.length > 1 && streamData[1] != null) ? streamData[1] : "Titre inconnu";
-        String duration = (streamData.length > 3 && streamData[3] != null) ? streamData[3] : "Durée inconnue";
-        String thumbnailUrl = (streamData.length > 2 && streamData[2] != null) ? streamData[2] : "https://via.placeholder.com/150";
-        String videoUrl = youtubeUrl;
-        
-        // Crée un objet TrackInfo pour stocker les informations
-        TrackInfo trackInfo = new TrackInfo(title, duration, "Artiste inconnu", thumbnailUrl, videoUrl);
-        
-        handleAudioLoadResult(streamUrl, trackInfo, event);
+        String videoId = extractYoutubeVideoId(youtubeUrl);
+        TrackInfo videoInfo = getYoutubeVideoInfo(videoId);
+    
+        if (videoInfo == null) {
+            videoInfo = new TrackInfo("Titre inconnu", "Durée inconnue", "Artiste inconnu", "https://via.placeholder.com/150", youtubeUrl);
+        }
+    
+        handleAudioLoadResult(streamUrl, videoInfo, event);
     }
+    
     
 
     // Gère le chargement d'une piste audio dans le gestionnaire de musique
