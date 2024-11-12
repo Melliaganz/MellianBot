@@ -17,7 +17,6 @@ import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 
-import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.entities.GuildVoiceState;
@@ -43,7 +42,6 @@ public class Main extends ListenerAdapter {
     private String spotifyClientId;
     private String spotifyClientSecret;
     private String spotifyAccessToken;
-    private static Dotenv dotenv;
 
 
     // Constructeur : initialise les configurations et les sources d'audio
@@ -62,11 +60,7 @@ public class Main extends ListenerAdapter {
 
     // Point d'entrée principal de l'application
     public static void main(String[] args) throws Exception {
-        dotenv = Dotenv.configure()
-                .directory("src/main/resources")
-                .filename(".env")
-                .load();
-        String discordToken = dotenv.get("DISCORD_TOKEN");
+        String discordToken = System.getenv("DISCORD_TOKEN");
         if (discordToken == null || discordToken.isEmpty()) {
             throw new IllegalArgumentException("Le token Discord est manquant. Assurez-vous que la variable d'environnement DISCORD_TOKEN est définie.");
         }
@@ -84,11 +78,8 @@ public class Main extends ListenerAdapter {
 
     // Charge les informations de configuration pour Spotify
     private void loadProperties() {
-        this.spotifyClientId = dotenv.get("SPOTIFY_CLIENT_ID");
-        this.spotifyClientSecret = dotenv.get("SPOTIFY_CLIENT_SECRET");
-
-        System.out.println("SPOTIFY_CLIENT_ID récupéré : " + (spotifyClientId != null ? "Oui" : "Non"));
-        System.out.println("SPOTIFY_CLIENT_SECRET récupéré : " + (spotifyClientSecret != null ? "Oui" : "Non"));
+        this.spotifyClientId = System.getenv("SPOTIFY_CLIENT_ID");
+        this.spotifyClientSecret = System.getenv("SPOTIFY_CLIENT_SECRET");
 
         if (spotifyClientId == null || spotifyClientId.isEmpty() || spotifyClientSecret == null || spotifyClientSecret.isEmpty()) {
             throw new IllegalArgumentException("Les identifiants Spotify (SPOTIFY_CLIENT_ID ou SPOTIFY_CLIENT_SECRET) sont manquants. Assurez-vous que les variables d'environnement sont définies.");
@@ -115,14 +106,9 @@ public class Main extends ListenerAdapter {
 
     // Récupère un token d'accès Spotify en effectuant une requête d'authentification
     public String getSpotifyAccessToken() {
-        if (spotifyClientId == null || spotifyClientSecret == null) {
-            System.out.println("Client ID ou Secret Spotify est manquant.");
-            return null;
-        }
-    
         String auth = spotifyClientId + ":" + spotifyClientSecret;
         String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
-        
+
         for (int retryCount = 0; retryCount < 3; retryCount++) {
             try {
                 URL url = new URL("https://accounts.spotify.com/api/token");
@@ -134,10 +120,7 @@ public class Main extends ListenerAdapter {
                 try (OutputStream os = conn.getOutputStream()) {
                     os.write("grant_type=client_credentials".getBytes("utf-8"));
                 }
-                int responseCode = conn.getResponseCode();
-                System.out.println("Code de réponse Spotify : " + responseCode);
-    
-                if (responseCode == 200) {
+                if (conn.getResponseCode() == 200) {
                     BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "utf-8"));
                     StringBuilder response = new StringBuilder();
                     String responseLine;
@@ -145,7 +128,7 @@ public class Main extends ListenerAdapter {
                     JsonObject jsonObject = JsonParser.parseString(response.toString()).getAsJsonObject();
                     return jsonObject.get("access_token").getAsString();
                 } else {
-                    System.out.println("Erreur : Code de réponse Spotify " + responseCode);
+                    System.out.println("Erreur : Code de réponse Spotify " + conn.getResponseCode());
                 }
             } catch (IOException e) {
                 e.printStackTrace();
