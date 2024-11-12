@@ -226,6 +226,74 @@ public class Main extends ListenerAdapter {
                 musicManager.getScheduler().pauseTrack();
                 event.getChannel().sendMessage("Lecture mise en pause.").queue();
             }
+        } else if (message.startsWith("!first")) {
+            String[] parts = message.split(" ", 2);
+            if (parts.length < 2) {
+                event.getChannel().sendMessage("Vous devez fournir un lien ou des mots-clés après la commande !playfirst.").queue();
+                return;
+            }
+            String input = parts[1];
+            GuildVoiceState voiceState = event.getMember().getVoiceState();
+            AudioChannelUnion channelUnion = voiceState.getChannel();
+            if (channelUnion instanceof VoiceChannel) {
+                VoiceChannel channel = (VoiceChannel) channelUnion;
+                if (!event.getGuild().getAudioManager().isConnected()) {
+                    event.getGuild().getAudioManager().openAudioConnection(channel);
+                    System.out.println("Bot connecté au canal vocal : " + channel.getName());
+                }
+                if (musicManager == null) {
+                    musicManager = new MusicManager(playerManager, event.getGuild(), event.getJDA(), event.getChannel().asTextChannel(), youTubeService);
+                }
+                event.getGuild().getAudioManager().setSendingHandler(new AudioPlayerSendHandler(musicManager.getPlayer()));
+        
+                if (input.startsWith("http://") || input.startsWith("https://www.youtube.com") || input.startsWith("https://youtu.be")) {
+                    String[] streamData = getYoutubeStreamUrlAndTitle(input);
+                    if (streamData != null) {
+                        String streamUrl = streamData[0];
+                        String title = streamData[1];
+                        String duration = streamData[3];
+                        String videoId = extractYoutubeVideoId(input);
+                        String thumbnailUrl = "https://img.youtube.com/vi/" + videoId + "/hqdefault.jpg";
+                        String videoUrl = input;
+        
+                        TrackInfo videoInfo = musicManager.getScheduler().getYoutubeVideoInfo(videoId);
+                        String artist = videoInfo.getArtist();
+        
+                        // Création de l'objet TrackInfo
+                        TrackInfo trackInfo = new TrackInfo(title, duration, artist, thumbnailUrl, videoUrl);
+                        playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
+                            @Override
+                            public void trackLoaded(AudioTrack track) {
+                                track.setUserData(trackInfo);
+                                event.getChannel().sendMessage("Ajouté en priorité à la file d'attente : " + trackInfo.getTitle()).queue();
+                                musicManager.getScheduler().queueFirst(track);
+                            }
+        
+                            @Override
+                            public void playlistLoaded(AudioPlaylist playlist) {
+                                event.getChannel().sendMessage("Playlist détectée. Ajout de la première piste en priorité à la file d'attente.").queue();
+                                if (!playlist.getTracks().isEmpty()) {
+                                    AudioTrack track = playlist.getTracks().get(0);
+                                    track.setUserData(trackInfo);
+                                    musicManager.getScheduler().queueFirst(track);
+                                }
+                            }
+        
+                            @Override
+                            public void noMatches() {
+                                event.getChannel().sendMessage("Aucune piste trouvée.").queue();
+                            }
+        
+                            @Override
+                            public void loadFailed(FriendlyException exception) {
+                                event.getChannel().sendMessage("Erreur lors du chargement de la piste : " + exception.getMessage()).queue();
+                            }
+                        });
+                    } else {
+                        event.getChannel().sendMessage("Erreur lors de la récupération du flux audio avec yt-dlp.").queue();
+                    }
+                }
+            }
         } else if (message.startsWith("!resume")) {
             if (musicManager != null) {
                 musicManager.getScheduler().resumeTrack();
@@ -270,6 +338,7 @@ public class Main extends ListenerAdapter {
                     "!pause : Met la lecture en pause.\n" +
                     "!resume : Reprend la lecture.\n" +
                     "!skip : Saute la piste en cours.\n" +
+                    "!first : Permet de placer une track en premier de la file d'attente." +
                     "!stop : Arrête la lecture et vide la file d'attente.\n" +
                     "!clear : Vide la file d'attente sans arrêter la piste en cours.\n" +
                     "!queue : Affiche les pistes présentes dans la file d'attente.\n" +
@@ -373,38 +442,3 @@ public class Main extends ListenerAdapter {
     }
 }
 
-class TrackInfo {
-    private final String title;
-    private final String duration;
-    private final String artist;
-    private final String thumbnailUrl;
-    private final String videoUrl;
-
-    public TrackInfo(String title, String duration, String artist, String thumbnailUrl, String videoUrl) {
-        this.title = title;
-        this.duration = duration;
-        this.artist = artist;
-        this.thumbnailUrl = thumbnailUrl;
-        this.videoUrl = videoUrl;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public String getDuration() {
-        return duration;
-    }
-
-    public String getArtist() {
-        return artist;
-    }
-
-    public String getThumbnailUrl() {
-        return thumbnailUrl;
-    }
-
-    public String getVideoUrl() {
-        return videoUrl;
-    }
-}

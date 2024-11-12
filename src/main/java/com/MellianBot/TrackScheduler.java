@@ -74,6 +74,24 @@ public class TrackScheduler extends AudioEventAdapter {
         jda.getPresence().setActivity(Activity.watching("comment faire avec !help"));
         System.out.println("Aucune piste en cours. Activité du bot réinitialisée.");
     }
+    public void queueFirst(AudioTrack track) {
+        if (!player.startTrack(track, true)) {
+            LinkedBlockingQueue<AudioTrack> newQueue = new LinkedBlockingQueue<>();
+            newQueue.offer(track); // Ajoute la nouvelle piste au début
+            newQueue.addAll(queue); // Ajoute toutes les autres pistes après
+            queue.clear(); // Vide l'ancienne file d'attente
+            queue.addAll(newQueue); // Remplace la file d'attente par la nouvelle
+        } else {
+            currentTrack = track;
+            String videoId = extractYoutubeVideoId(track.getInfo().uri);
+            if (videoId != null) {
+                TrackInfo videoInfo = getYoutubeVideoInfo(videoId);
+                track.setUserData(videoInfo);
+            }
+            updateBotActivity(track);
+            sendNowPlayingMessage(track);
+        }
+    }
     
     public void nextTrack() {
         AudioTrack nextTrack = queue.poll();
