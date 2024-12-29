@@ -478,19 +478,27 @@ public class Main extends ListenerAdapter {
     // Utilise yt-dlp pour obtenir le flux audio, le titre, la durée, et la miniature de la vidéo YouTube
     private String[] getYoutubeStreamUrlAndTitle(String videoUrl) {
         try {
-            // Extraction via yt-dlp
-            ProcessBuilder urlBuilder = new ProcessBuilder("yt-dlp", "-f", "bestaudio", "--get-url", "--geo-bypass", videoUrl);
+            ProcessBuilder urlBuilder = new ProcessBuilder(
+                "yt-dlp", "-f", "bestaudio", "--get-url", "--no-check-certificate", "--geo-bypass", videoUrl
+            );
             Process urlProcess = urlBuilder.start();
+    
             BufferedReader urlReader = new BufferedReader(new InputStreamReader(urlProcess.getInputStream()));
             String streamUrl = urlReader.readLine();
     
             int urlExitCode = urlProcess.waitFor();
             if (urlExitCode != 0 || streamUrl == null) {
-                System.err.println("yt-dlp n'a pas pu traiter la vidéo : " + videoUrl);
+                BufferedReader errorReader = new BufferedReader(new InputStreamReader(urlProcess.getErrorStream()));
+                StringBuilder errorOutput = new StringBuilder();
+                String line;
+                while ((line = errorReader.readLine()) != null) {
+                    errorOutput.append(line).append("\n");
+                }
+                System.err.println("Erreur yt-dlp : " + errorOutput);
                 return null;
             }
     
-            // Extraire les informations de la vidéo (titre, durée, miniature)
+            // Extraire les métadonnées via l'API YouTube
             String videoId = extractYoutubeVideoId(videoUrl);
             if (videoId != null) {
                 TrackInfo videoInfo = getYoutubeVideoInfo(videoId);
@@ -504,7 +512,6 @@ public class Main extends ListenerAdapter {
         }
     }
     
-
 // Méthode pour extraire l'ID de la vidéo
 private String extractYoutubeVideoId(String url) {
     Matcher matcher = Pattern.compile("(?<=watch\\?v=|youtu\\.be/|youtube\\.com/embed/)[^&]+").matcher(url);
