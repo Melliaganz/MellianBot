@@ -386,28 +386,32 @@ public class Main extends ListenerAdapter {
 
     // Traite le chargement des informations YouTube et ajoute les informations de la piste dans la file d'attente
     private void handleYouTubeLoad(String youtubeUrl, MessageReceivedEvent event) {
-        try {
-            ProcessBuilder processBuilder = new ProcessBuilder(
-                "yt-dlp", "-f", "bestaudio[ext=webm][acodec=opus]", "--get-url", youtubeUrl
-            );
-            processBuilder.redirectErrorStream(true);
-            Process process = processBuilder.start();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+        String[] streamData = getYoutubeStreamUrlAndTitle(youtubeUrl);
     
-            String streamUrl = reader.readLine(); // Première ligne : URL du flux
-            int exitCode = process.waitFor();
-    
-            if (exitCode == 0 && streamUrl != null) {
-                loadTrackFromStreamUrl(streamUrl, event);
-            } else {
-                event.getChannel().sendMessage("Erreur : Impossible de récupérer le flux pour " + youtubeUrl).queue();
-            }
-        } catch (IOException | InterruptedException e) {
-            event.getChannel().sendMessage("Erreur avec yt-dlp : " + e.getMessage()).queue();
-            e.printStackTrace();
+        if (streamData == null || streamData.length < 1 || streamData[0] == null) {
+            event.getChannel().sendMessage("Erreur lors de la récupération du flux audio avec yt-dlp.").queue();
+            return;
         }
-    }
     
+        String streamUrl = streamData[0];
+        String videoId = extractYoutubeVideoId(youtubeUrl);
+        TrackInfo videoInfo = getYoutubeVideoInfo(videoId);
+    
+        if (videoInfo == null) {
+            videoInfo = new TrackInfo("Titre inconnu", "Durée inconnue", "Artiste inconnu", "https://via.placeholder.com/150", youtubeUrl);
+        }
+    
+        displayTrackInfo(videoInfo, event); // Display detailed track information
+        handleAudioLoadResult(streamUrl, videoInfo, event);
+    }
+    private void displayTrackInfo(TrackInfo trackInfo, MessageReceivedEvent event) {
+        String message = "**🎵 Now Playing:**\n" +
+                         "**Titre:** " + trackInfo.getTitle() + "\n" +
+                         "**Artiste:** " + trackInfo.getArtist() + "\n" +
+                         "**Durée:** " + trackInfo.getDuration() + "\n" +
+                         " )**";
+        event.getChannel().sendMessage(message).queue();
+    }
     private void loadTrackFromStreamUrl(String streamUrl, MessageReceivedEvent event) {
         playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
             @Override
@@ -435,11 +439,6 @@ public class Main extends ListenerAdapter {
     }
     // Gère le chargement d'une piste audio dans le gestionnaire de musique
     private void handleAudioLoadResult(String streamUrl, TrackInfo trackInfo, MessageReceivedEvent event) {
-        if (streamUrl == null) {
-            event.getChannel().sendMessage("Erreur : Impossible de charger le flux audio.").queue();
-            return;
-        }
-    
         Guild guild = event.getGuild();
         TextChannel textChannel = event.getChannel().asTextChannel();
         JDA jda = event.getJDA();
@@ -449,13 +448,13 @@ public class Main extends ListenerAdapter {
             @Override
             public void trackLoaded(AudioTrack track) {
                 track.setUserData(trackInfo);
-                event.getChannel().sendMessage("Ajouté à la file d'attente : **" + trackInfo.getTitle() + "**").queue();
                 musicManager.getScheduler().queueTrack(track);
+                event.getChannel().sendMessage("🎶 Ajouté à la file d'attente : **" + trackInfo.getTitle() + "**").queue();
             }
     
             @Override
             public void playlistLoaded(AudioPlaylist playlist) {
-                event.getChannel().sendMessage("Playlist détectée. Ajout de **" + playlist.getTracks().size() + " pistes**.").queue();
+                event.getChannel().sendMessage("Playlist détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
                 for (AudioTrack track : playlist.getTracks()) {
                     musicManager.getScheduler().queueTrack(track);
                 }
@@ -463,7 +462,7 @@ public class Main extends ListenerAdapter {
     
             @Override
             public void noMatches() {
-                event.getChannel().sendMessage("Aucune piste trouvée pour le lien donné.").queue();
+                event.getChannel().sendMessage("Aucune piste trouvée.").queue();
             }
     
             @Override
@@ -472,8 +471,6 @@ public class Main extends ListenerAdapter {
             }
         });
     }
-    
-
     // Récupère le titre de la piste depuis un lien Spotify
     private String getTrackTitleFromSpotify(String spotifyUrl) {
         try {
