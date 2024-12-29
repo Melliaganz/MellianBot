@@ -98,11 +98,6 @@ public class Main extends ListenerAdapter {
         this.spotifyAccessToken = getSpotifyAccessToken();
     }
     
-    
-    private void logDebug(String message) {
-        System.out.println("[DEBUG] " + message);
-    }
-    
 
     // Initialise le gestionnaire de source pour Spotify
     private void initializeSpotify() {
@@ -226,64 +221,29 @@ public class Main extends ListenerAdapter {
     // Lit une vidéo YouTube en fonction de l'URL fournie
     private void playYouTubeTrack(String youtubeUrl, MessageReceivedEvent event, MusicManager musicManager) {
         if (youtubeUrl.contains("list=")) {
-            handleYouTubePlaylist(youtubeUrl, event, musicManager);
+            handleYouTubePlaylist(youtubeUrl, event, musicManager); // Charge uniquement la première vidéo
         } else {
-            handleYouTubeLoad(youtubeUrl, event);
+            handleYouTubeLoad(youtubeUrl, event); // Charge une vidéo unique
         }
     }
     private void handleYouTubePlaylist(String playlistUrl, MessageReceivedEvent event, MusicManager musicManager) {
-        event.getChannel().sendMessage("Ce lien correspond à une playlist. Voulez-vous :\n" +
-                "1️⃣ Ajouter **toute la playlist** à la file d'attente\n" +
-                "2️⃣ Ajouter uniquement la **première vidéo** de la playlist\n" +
-                "Répondez avec `1` ou `2`.").queue(response -> {
-            event.getChannel().sendMessage("Veuillez répondre avec 1 ou 2 pour confirmer.").queue();
-    
-            event.getChannel().getJDA().addEventListener(new ListenerAdapter() {
-                @Override
-                public void onMessageReceived(MessageReceivedEvent responseEvent) {
-                    if (!responseEvent.getAuthor().equals(event.getAuthor())) return;
-    
-                    String userResponse = responseEvent.getMessage().getContentRaw().trim();
-                    if ("1".equals(userResponse)) {
-                        loadYouTubePlaylist(playlistUrl, event, musicManager);
-                    } else if ("2".equals(userResponse)) {
-                        loadFirstVideoFromPlaylist(playlistUrl, event, musicManager);
-                    } else {
-                        responseEvent.getChannel().sendMessage("Réponse invalide. Annulation de l'opération.").queue();
-                    }
-                    responseEvent.getJDA().removeEventListener(this);
-                }
-            });
-        });
-    }
-    private void loadYouTubePlaylist(String playlistUrl, MessageReceivedEvent event, MusicManager musicManager) {
         playerManager.loadItem(playlistUrl, new AudioLoadResultHandler() {
             @Override
             public void trackLoaded(AudioTrack track) {
-                // Cela ne devrait pas arriver pour une playlist
+                // Ne devrait pas arriver pour une playlist
             }
     
             @Override
             public void playlistLoaded(AudioPlaylist playlist) {
-                int totalTracks = playlist.getTracks().size();
-                event.getChannel().sendMessage("Playlist détectée : **" + playlist.getName() + "**. Ajout de " +
-                        totalTracks + " pistes à la file d'attente.").queue();
-    
-                int successCount = 0;
-                int errorCount = 0;
-    
-                for (AudioTrack track : playlist.getTracks()) {
-                    try {
-                        musicManager.getScheduler().queueTrack(track);
-                        successCount++;
-                    } catch (FriendlyException e) {
-                        System.err.println("Erreur lors du chargement de la piste : " + track.getInfo().title);
-                        errorCount++;
-                    }
+                if (playlist.getTracks().isEmpty()) {
+                    event.getChannel().sendMessage("La playlist est vide ou introuvable.").queue();
+                    return;
                 }
     
-                event.getChannel().sendMessage("Ajout terminé : **" + successCount + " pistes ajoutées**, **" +
-                        errorCount + " pistes échouées**.").queue();
+                // Charge uniquement la première vidéo
+                AudioTrack firstTrack = playlist.getTracks().get(0);
+                musicManager.getScheduler().queueTrack(firstTrack);
+                event.getChannel().sendMessage("Ajouté à la file d'attente : **" + firstTrack.getInfo().title + "**").queue();
             }
     
             @Override
@@ -298,34 +258,6 @@ public class Main extends ListenerAdapter {
         });
     }
     
-    private void loadFirstVideoFromPlaylist(String playlistUrl, MessageReceivedEvent event, MusicManager musicManager) {
-        playerManager.loadItem(playlistUrl, new AudioLoadResultHandler() {
-            @Override
-            public void trackLoaded(AudioTrack track) {
-                musicManager.getScheduler().queueTrack(track);
-                event.getChannel().sendMessage("Ajout de la première vidéo de la playlist à la file d'attente : " +
-                        track.getInfo().title).queue();
-            }
-    
-            @Override
-            public void playlistLoaded(AudioPlaylist playlist) {
-                AudioTrack firstTrack = playlist.getTracks().get(0);
-                musicManager.getScheduler().queueTrack(firstTrack);
-                event.getChannel().sendMessage("Ajout de la première vidéo de la playlist à la file d'attente : " +
-                        firstTrack.getInfo().title).queue();
-            }
-    
-            @Override
-            public void noMatches() {
-                event.getChannel().sendMessage("Aucune vidéo trouvée pour ce lien.").queue();
-            }
-    
-            @Override
-            public void loadFailed(FriendlyException exception) {
-                event.getChannel().sendMessage("Erreur lors du chargement de la vidéo : " + exception.getMessage()).queue();
-            }
-        });
-    }
     // Obtient le canal vocal de l'utilisateur qui a envoyé la commande
     private VoiceChannel getUserVoiceChannel(MessageReceivedEvent event) {
         GuildVoiceState voiceState = event.getMember().getVoiceState();
