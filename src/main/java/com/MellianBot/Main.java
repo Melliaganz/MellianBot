@@ -227,99 +227,32 @@ public class Main extends ListenerAdapter {
         }
     }
     private void handleYouTubePlaylist(String playlistUrl, MessageReceivedEvent event, MusicManager musicManager) {
-        event.getChannel().sendMessage("🎵 Ce lien correspond à une playlist. Voulez-vous :\n" +
-                "1️⃣ Ajouter **seulement la première piste** de la playlist\n" +
-                "2️⃣ Ajouter **toutes les pistes** de la playlist à la file d'attente\n" +
-                "Répondez avec `1` ou `2`.").queue(response -> {
-            // Listener temporaire pour capter la réponse de l'utilisateur
-            event.getJDA().addEventListener(new ListenerAdapter() {
-                @Override
-                public void onMessageReceived(MessageReceivedEvent responseEvent) {
-                    if (!responseEvent.getAuthor().equals(event.getAuthor()) || 
-                        !responseEvent.getChannel().equals(event.getChannel())) {
-                        return; // Filtrer uniquement les réponses valides
-                    }
+        try {
+            // Commande pour extraire tous les IDs des vidéos de la playlist
+            ProcessBuilder processBuilder = new ProcessBuilder(
+                "yt-dlp", "--flat-playlist", "--get-id", "--no-check-certificate", playlistUrl
+            );
+            Process process = processBuilder.start();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
     
-                    String userResponse = responseEvent.getMessage().getContentRaw().trim();
-                    if ("1".equals(userResponse)) {
-                        loadFirstTrackFromPlaylist(playlistUrl, event, musicManager);
-                    } else if ("2".equals(userResponse)) {
-                        loadAllTracksFromPlaylist(playlistUrl, event, musicManager);
-                    } else {
-                        responseEvent.getChannel().sendMessage("Réponse invalide. Annulation de l'opération.").queue();
-                    }
-                    responseEvent.getJDA().removeEventListener(this); // Supprimer le listener après la réponse
-                }
-            });
-        });
-    }
-    
-    // Charger uniquement la première piste de la playlist
-    private void loadFirstTrackFromPlaylist(String playlistUrl, MessageReceivedEvent event, MusicManager musicManager) {
-        playerManager.loadItem(playlistUrl, new AudioLoadResultHandler() {
-            @Override
-            public void trackLoaded(AudioTrack track) {
-                musicManager.getScheduler().queueTrack(track);
-                event.getChannel().sendMessage("🎶 Ajouté à la file d'attente : **" + track.getInfo().title + "**").queue();
+            String videoId;
+            while ((videoId = reader.readLine()) != null) {
+                String videoUrl = "https://www.youtube.com/watch?v=" + videoId;
+                handleYouTubeLoad(videoUrl, event);
             }
     
-            @Override
-            public void playlistLoaded(AudioPlaylist playlist) {
-                if (!playlist.getTracks().isEmpty()) {
-                    AudioTrack firstTrack = playlist.getTracks().get(0);
-                    musicManager.getScheduler().queueTrack(firstTrack);
-                    event.getChannel().sendMessage("🎶 Ajouté à la file d'attente : **" + firstTrack.getInfo().title + "**").queue();
-                } else {
-                    event.getChannel().sendMessage("La playlist est vide ou inaccessible.").queue();
-                }
-            }
-    
-            @Override
-            public void noMatches() {
-                event.getChannel().sendMessage("Aucune vidéo trouvée pour cette playlist.").queue();
-            }
-    
-            @Override
-            public void loadFailed(FriendlyException exception) {
-                event.getChannel().sendMessage("Erreur lors du chargement de la playlist : " + exception.getMessage()).queue();
-            }
-        });
-    }
-    
-
-// Charger toutes les pistes de la playlist
-private void loadAllTracksFromPlaylist(String playlistUrl, MessageReceivedEvent event, MusicManager musicManager) {
-    playerManager.loadItem(playlistUrl, new AudioLoadResultHandler() {
-        @Override
-        public void trackLoaded(AudioTrack track) {
-            // Ce cas ne devrait pas arriver pour une playlist
-        }
-
-        @Override
-        public void playlistLoaded(AudioPlaylist playlist) {
-            if (!playlist.getTracks().isEmpty()) {
-                event.getChannel().sendMessage("🎵 Playlist détectée : **" + playlist.getName() + "**.\n" +
-                        "Ajout de **" + playlist.getTracks().size() + " pistes** à la file d'attente.").queue();
-
-                for (AudioTrack track : playlist.getTracks()) {
-                    musicManager.getScheduler().queueTrack(track);
-                }
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                event.getChannel().sendMessage("Erreur lors du chargement de la playlist.").queue();
             } else {
-                event.getChannel().sendMessage("La playlist est vide ou inaccessible.").queue();
+                event.getChannel().sendMessage("Playlist chargée avec succès !").queue();
             }
+        } catch (IOException | InterruptedException e) {
+            event.getChannel().sendMessage("Erreur pendant le chargement de la playlist : " + e.getMessage()).queue();
+            e.printStackTrace();
         }
-
-        @Override
-        public void noMatches() {
-            event.getChannel().sendMessage("Aucune playlist trouvée pour ce lien.").queue();
-        }
-
-        @Override
-        public void loadFailed(FriendlyException exception) {
-            event.getChannel().sendMessage("Erreur lors du chargement de la playlist : " + exception.getMessage()).queue();
-        }
-    });
-}
+    }
+    
     // Obtient le canal vocal de l'utilisateur qui a envoyé la commande
     private VoiceChannel getUserVoiceChannel(MessageReceivedEvent event) {
         GuildVoiceState voiceState = event.getMember().getVoiceState();
