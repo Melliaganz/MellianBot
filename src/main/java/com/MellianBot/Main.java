@@ -230,30 +230,29 @@ public class Main extends ListenerAdapter {
         playerManager.loadItem(playlistUrl, new AudioLoadResultHandler() {
             @Override
             public void trackLoaded(AudioTrack track) {
-                // Ne devrait pas arriver pour une playlist
+                // Should not happen for a playlist
             }
     
             @Override
             public void playlistLoaded(AudioPlaylist playlist) {
                 if (playlist.getTracks().isEmpty()) {
-                    event.getChannel().sendMessage("La playlist est vide ou introuvable.").queue();
+                    event.getChannel().sendMessage("The playlist is empty or inaccessible.").queue();
                     return;
                 }
     
-                // Charge uniquement la première vidéo
                 AudioTrack firstTrack = playlist.getTracks().get(0);
                 musicManager.getScheduler().queueTrack(firstTrack);
-                event.getChannel().sendMessage("Ajouté à la file d'attente : **" + firstTrack.getInfo().title + "**").queue();
+                event.getChannel().sendMessage("Added the first video of the playlist to the queue: **" + firstTrack.getInfo().title + "**").queue();
             }
     
             @Override
             public void noMatches() {
-                event.getChannel().sendMessage("Aucune playlist trouvée pour ce lien.").queue();
+                event.getChannel().sendMessage("No matches found for the playlist link.").queue();
             }
     
             @Override
             public void loadFailed(FriendlyException exception) {
-                event.getChannel().sendMessage("Erreur lors du chargement de la playlist : " + exception.getMessage()).queue();
+                event.getChannel().sendMessage("Failed to load the playlist: " + exception.getMessage()).queue();
             }
         });
     }
@@ -479,39 +478,32 @@ public class Main extends ListenerAdapter {
     private String[] getYoutubeStreamUrlAndTitle(String videoUrl) {
         try {
             ProcessBuilder urlBuilder = new ProcessBuilder(
-                "yt-dlp", "-f", "bestaudio", "--get-url", "--no-check-certificate", "--geo-bypass", videoUrl
+                "yt-dlp", "-f", "bestaudio[ext=webm][acodec=opus]", "--get-url", "--no-check-certificate", "--geo-bypass", videoUrl
             );
-            Process urlProcess = urlBuilder.start();
+            // If yt-dlp.exe is not in PATH, provide its full path:
+            // ProcessBuilder urlBuilder = new ProcessBuilder("C:\\path\\to\\yt-dlp.exe", "-f", ...);
     
-            BufferedReader urlReader = new BufferedReader(new InputStreamReader(urlProcess.getInputStream()));
-            String streamUrl = urlReader.readLine();
+            urlBuilder.redirectErrorStream(true); // Redirect errors to the input stream
+            Process process = urlBuilder.start();
     
-            int urlExitCode = urlProcess.waitFor();
-            if (urlExitCode != 0 || streamUrl == null) {
-                BufferedReader errorReader = new BufferedReader(new InputStreamReader(urlProcess.getErrorStream()));
-                StringBuilder errorOutput = new StringBuilder();
-                String line;
-                while ((line = errorReader.readLine()) != null) {
-                    errorOutput.append(line).append("\n");
-                }
-                System.err.println("Erreur yt-dlp : " + errorOutput);
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String streamUrl = reader.readLine(); // Read the URL from yt-dlp
+    
+            int exitCode = process.waitFor();
+            if (exitCode != 0 || streamUrl == null) {
+                System.err.println("yt-dlp failed to fetch the stream URL.");
                 return null;
             }
     
-            // Extraire les métadonnées via l'API YouTube
+            // Optional: Get metadata via YouTube API
             String videoId = extractYoutubeVideoId(videoUrl);
-            if (videoId != null) {
-                TrackInfo videoInfo = getYoutubeVideoInfo(videoId);
-                return new String[]{streamUrl, videoInfo.getTitle(), videoInfo.getThumbnailUrl(), videoInfo.getDuration()};
-            }
-    
-            return new String[]{streamUrl, "Titre inconnu", "https://via.placeholder.com/150", "Durée inconnue"};
+            TrackInfo videoInfo = getYoutubeVideoInfo(videoId);
+            return new String[]{streamUrl, videoInfo.getTitle(), videoInfo.getThumbnailUrl(), videoInfo.getDuration()};
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
             return null;
         }
     }
-    
 // Méthode pour extraire l'ID de la vidéo
 private String extractYoutubeVideoId(String url) {
     Matcher matcher = Pattern.compile("(?<=watch\\?v=|youtu\\.be/|youtube\\.com/embed/)[^&]+").matcher(url);
