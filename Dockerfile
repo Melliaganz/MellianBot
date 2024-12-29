@@ -14,5 +14,5 @@ RUN apt-get update && \
     wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp && \
     chmod a+rx /usr/local/bin/yt-dlp
 
-COPY --from=build /app/target/MellianBot-1.1-jar-with-dependencies.jar /app/bot.jar
+COPY --from=build /app/target/MellianBot-1.2-jar-with-dependencies.jar /app/bot.jar
 CMD ["java", "-jar", "/app/bot.jar"]
