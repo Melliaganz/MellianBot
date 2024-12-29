@@ -477,21 +477,26 @@ public class Main extends ListenerAdapter {
     // Utilise yt-dlp pour obtenir le flux audio, le titre, la durée, et la miniature de la vidéo YouTube
     private String[] getYoutubeStreamUrlAndTitle(String videoUrl) {
         try {
+            // Use --playlist-items 1 to fetch only the first video
             ProcessBuilder urlBuilder = new ProcessBuilder(
-                "yt-dlp", "-f", "bestaudio[ext=webm][acodec=opus]", "--get-url", "--no-check-certificate", "--geo-bypass", videoUrl
+                "yt-dlp", "-f", "bestaudio[ext=webm][acodec=opus]", "--get-url", "--playlist-items", "1", "--no-check-certificate", "--geo-bypass", videoUrl
             );
-            // If yt-dlp.exe is not in PATH, provide its full path:
-            // ProcessBuilder urlBuilder = new ProcessBuilder("C:\\path\\to\\yt-dlp.exe", "-f", ...);
     
             urlBuilder.redirectErrorStream(true); // Redirect errors to the input stream
             Process process = urlBuilder.start();
     
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String streamUrl = reader.readLine(); // Read the URL from yt-dlp
+            String streamUrl = reader.readLine(); // Read the first audio stream URL
     
             int exitCode = process.waitFor();
             if (exitCode != 0 || streamUrl == null) {
-                System.err.println("yt-dlp failed to fetch the stream URL.");
+                BufferedReader errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream()));
+                StringBuilder errorOutput = new StringBuilder();
+                String line;
+                while ((line = errorReader.readLine()) != null) {
+                    errorOutput.append(line).append("\n");
+                }
+                System.err.println("Error with yt-dlp: " + errorOutput);
                 return null;
             }
     
@@ -504,6 +509,7 @@ public class Main extends ListenerAdapter {
             return null;
         }
     }
+    
 // Méthode pour extraire l'ID de la vidéo
 private String extractYoutubeVideoId(String url) {
     Matcher matcher = Pattern.compile("(?<=watch\\?v=|youtu\\.be/|youtube\\.com/embed/)[^&]+").matcher(url);
