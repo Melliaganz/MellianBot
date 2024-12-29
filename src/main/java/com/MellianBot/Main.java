@@ -231,13 +231,14 @@ public class Main extends ListenerAdapter {
                 "1️⃣ Ajouter **seulement la première piste** de la playlist\n" +
                 "2️⃣ Ajouter **toutes les pistes** de la playlist à la file d'attente\n" +
                 "Répondez avec `1` ou `2`.").queue(response -> {
-            event.getChannel().sendMessage("Veuillez répondre avec `1` ou `2` pour confirmer.").queue();
-    
             // Listener temporaire pour capter la réponse de l'utilisateur
             event.getJDA().addEventListener(new ListenerAdapter() {
                 @Override
                 public void onMessageReceived(MessageReceivedEvent responseEvent) {
-                    if (!responseEvent.getAuthor().equals(event.getAuthor())) return; // Filtrer pour capter uniquement les réponses de l'utilisateur
+                    if (!responseEvent.getAuthor().equals(event.getAuthor()) || 
+                        !responseEvent.getChannel().equals(event.getChannel())) {
+                        return; // Filtrer uniquement les réponses valides
+                    }
     
                     String userResponse = responseEvent.getMessage().getContentRaw().trim();
                     if ("1".equals(userResponse)) {
@@ -252,33 +253,39 @@ public class Main extends ListenerAdapter {
             });
         });
     }
+    
     // Charger uniquement la première piste de la playlist
-private void loadFirstTrackFromPlaylist(String playlistUrl, MessageReceivedEvent event, MusicManager musicManager) {
-    playerManager.loadItem(playlistUrl, new AudioLoadResultHandler() {
-        @Override
-        public void trackLoaded(AudioTrack track) {
-            musicManager.getScheduler().queueTrack(track);
-            event.getChannel().sendMessage("🎶 Ajouté à la file d'attente : **" + track.getInfo().title + "**").queue();
-        }
-
-        @Override
-        public void playlistLoaded(AudioPlaylist playlist) {
-            AudioTrack firstTrack = playlist.getTracks().get(0);
-            musicManager.getScheduler().queueTrack(firstTrack);
-            event.getChannel().sendMessage("🎶 Ajouté à la file d'attente : **" + firstTrack.getInfo().title + "**").queue();
-        }
-
-        @Override
-        public void noMatches() {
-            event.getChannel().sendMessage("Aucune vidéo trouvée pour cette playlist.").queue();
-        }
-
-        @Override
-        public void loadFailed(FriendlyException exception) {
-            event.getChannel().sendMessage("Erreur lors du chargement de la playlist : " + exception.getMessage()).queue();
-        }
-    });
-}
+    private void loadFirstTrackFromPlaylist(String playlistUrl, MessageReceivedEvent event, MusicManager musicManager) {
+        playerManager.loadItem(playlistUrl, new AudioLoadResultHandler() {
+            @Override
+            public void trackLoaded(AudioTrack track) {
+                musicManager.getScheduler().queueTrack(track);
+                event.getChannel().sendMessage("🎶 Ajouté à la file d'attente : **" + track.getInfo().title + "**").queue();
+            }
+    
+            @Override
+            public void playlistLoaded(AudioPlaylist playlist) {
+                if (!playlist.getTracks().isEmpty()) {
+                    AudioTrack firstTrack = playlist.getTracks().get(0);
+                    musicManager.getScheduler().queueTrack(firstTrack);
+                    event.getChannel().sendMessage("🎶 Ajouté à la file d'attente : **" + firstTrack.getInfo().title + "**").queue();
+                } else {
+                    event.getChannel().sendMessage("La playlist est vide ou inaccessible.").queue();
+                }
+            }
+    
+            @Override
+            public void noMatches() {
+                event.getChannel().sendMessage("Aucune vidéo trouvée pour cette playlist.").queue();
+            }
+    
+            @Override
+            public void loadFailed(FriendlyException exception) {
+                event.getChannel().sendMessage("Erreur lors du chargement de la playlist : " + exception.getMessage()).queue();
+            }
+        });
+    }
+    
 
 // Charger toutes les pistes de la playlist
 private void loadAllTracksFromPlaylist(String playlistUrl, MessageReceivedEvent event, MusicManager musicManager) {
@@ -290,11 +297,15 @@ private void loadAllTracksFromPlaylist(String playlistUrl, MessageReceivedEvent 
 
         @Override
         public void playlistLoaded(AudioPlaylist playlist) {
-            event.getChannel().sendMessage("🎵 Playlist détectée : **" + playlist.getName() + "**.\n" +
-                    "Ajout de **" + playlist.getTracks().size() + " pistes** à la file d'attente.").queue();
+            if (!playlist.getTracks().isEmpty()) {
+                event.getChannel().sendMessage("🎵 Playlist détectée : **" + playlist.getName() + "**.\n" +
+                        "Ajout de **" + playlist.getTracks().size() + " pistes** à la file d'attente.").queue();
 
-            for (AudioTrack track : playlist.getTracks()) {
-                musicManager.getScheduler().queueTrack(track);
+                for (AudioTrack track : playlist.getTracks()) {
+                    musicManager.getScheduler().queueTrack(track);
+                }
+            } else {
+                event.getChannel().sendMessage("La playlist est vide ou inaccessible.").queue();
             }
         }
 
