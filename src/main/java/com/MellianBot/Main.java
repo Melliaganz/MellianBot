@@ -386,26 +386,53 @@ public class Main extends ListenerAdapter {
 
     // Traite le chargement des informations YouTube et ajoute les informations de la piste dans la file d'attente
     private void handleYouTubeLoad(String youtubeUrl, MessageReceivedEvent event) {
-        String[] streamData = getYoutubeStreamUrlAndTitle(youtubeUrl);
+        try {
+            ProcessBuilder processBuilder = new ProcessBuilder(
+                "yt-dlp", "-f", "bestaudio[ext=webm][acodec=opus]", "--get-url", youtubeUrl
+            );
+            processBuilder.redirectErrorStream(true);
+            Process process = processBuilder.start();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
     
-        if (streamData == null || streamData.length < 1 || streamData[0] == null) {
-            event.getChannel().sendMessage("Erreur lors de la récupération du flux audio avec yt-dlp.").queue();
-            return;
+            String streamUrl = reader.readLine(); // Première ligne : URL du flux
+            int exitCode = process.waitFor();
+    
+            if (exitCode == 0 && streamUrl != null) {
+                loadTrackFromStreamUrl(streamUrl, event);
+            } else {
+                event.getChannel().sendMessage("Erreur : Impossible de récupérer le flux pour " + youtubeUrl).queue();
+            }
+        } catch (IOException | InterruptedException e) {
+            event.getChannel().sendMessage("Erreur avec yt-dlp : " + e.getMessage()).queue();
+            e.printStackTrace();
         }
-    
-        String streamUrl = streamData[0];
-        String videoId = extractYoutubeVideoId(youtubeUrl);
-        TrackInfo videoInfo = getYoutubeVideoInfo(videoId);
-    
-        if (videoInfo == null) {
-            videoInfo = new TrackInfo("Titre inconnu", "Durée inconnue", "Artiste inconnu", "https://via.placeholder.com/150", youtubeUrl);
-        }
-    
-        handleAudioLoadResult(streamUrl, videoInfo, event);
     }
     
+    private void loadTrackFromStreamUrl(String streamUrl, MessageReceivedEvent event) {
+        playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
+            @Override
+            public void trackLoaded(AudioTrack track) {
+                MusicManager musicManager = botMusicService.getMusicManager(event.getGuild(), event.getChannel().asTextChannel(), event.getJDA());
+                musicManager.getScheduler().queueTrack(track);
+                event.getChannel().sendMessage("Ajouté à la file d'attente : **" + track.getInfo().title + "**").queue();
+            }
     
-
+            @Override
+            public void playlistLoaded(AudioPlaylist playlist) {
+                event.getChannel().sendMessage("Erreur : Une playlist n'est pas attendue ici.").queue();
+            }
+    
+            @Override
+            public void noMatches() {
+                event.getChannel().sendMessage("Aucune piste trouvée pour le lien donné.").queue();
+            }
+    
+            @Override
+            public void loadFailed(FriendlyException exception) {
+                event.getChannel().sendMessage("Erreur lors du chargement de la piste : " + exception.getMessage()).queue();
+            }
+        });
+    }
     // Gère le chargement d'une piste audio dans le gestionnaire de musique
     private void handleAudioLoadResult(String streamUrl, TrackInfo trackInfo, MessageReceivedEvent event) {
         if (streamUrl == null) {
