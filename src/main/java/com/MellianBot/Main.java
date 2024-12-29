@@ -227,35 +227,46 @@ public class Main extends ListenerAdapter {
         }
     }
     private void handleYouTubePlaylist(String playlistUrl, MessageReceivedEvent event, MusicManager musicManager) {
+        System.out.println("Attempting to load playlist: " + playlistUrl);
+    
         playerManager.loadItem(playlistUrl, new AudioLoadResultHandler() {
             @Override
             public void trackLoaded(AudioTrack track) {
-                // Should not happen for a playlist
+                System.out.println("Track loaded (unexpected): " + track.getInfo().title);
             }
     
             @Override
             public void playlistLoaded(AudioPlaylist playlist) {
+                System.out.println("Playlist loaded with " + playlist.getTracks().size() + " tracks.");
+    
                 if (playlist.getTracks().isEmpty()) {
                     event.getChannel().sendMessage("The playlist is empty or inaccessible.").queue();
                     return;
                 }
     
-                AudioTrack firstTrack = playlist.getTracks().get(0);
-                musicManager.getScheduler().queueTrack(firstTrack);
-                event.getChannel().sendMessage("Added the first video of the playlist to the queue: **" + firstTrack.getInfo().title + "**").queue();
+                // Queue each track
+                for (AudioTrack track : playlist.getTracks()) {
+                    System.out.println("Queuing track: " + track.getInfo().title);
+                    musicManager.getScheduler().queueTrack(track);
+                }
+    
+                event.getChannel().sendMessage("Playlist loaded successfully.").queue();
             }
     
             @Override
             public void noMatches() {
-                event.getChannel().sendMessage("No matches found for the playlist link.").queue();
+                System.err.println("No matches found for playlist: " + playlistUrl);
+                event.getChannel().sendMessage("No matches found for the playlist URL.").queue();
             }
     
             @Override
             public void loadFailed(FriendlyException exception) {
-                event.getChannel().sendMessage("Failed to load the playlist: " + exception.getMessage()).queue();
+                System.err.println("Failed to load playlist: " + exception.getMessage());
+                event.getChannel().sendMessage("Error loading playlist: " + exception.getMessage()).queue();
             }
         });
     }
+    
     
     // Obtient le canal vocal de l'utilisateur qui a envoyé la commande
     private VoiceChannel getUserVoiceChannel(MessageReceivedEvent event) {
