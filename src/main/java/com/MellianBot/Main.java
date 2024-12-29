@@ -326,29 +326,22 @@ public class Main extends ListenerAdapter {
     
 
     private void handleQueueCommand(MessageReceivedEvent event) {
+        if (!event.isFromGuild()) {
+            event.getChannel().sendMessage("Cette commande n'est disponible que dans les serveurs.").queue();
+            return;
+        }
+        
         Guild guild = event.getGuild();
         TextChannel textChannel = event.getChannel().asTextChannel();
         JDA jda = event.getJDA();
         MusicManager musicManager = botMusicService.getMusicManager(guild, textChannel, jda);
-    
-        StringBuilder queueMessage = new StringBuilder("File d'attente :\n");
-        int trackNumber = 1;
-    
-        for (AudioTrack track : musicManager.getScheduler().getQueue()) {
-            TrackInfo trackInfo = (TrackInfo) track.getUserData();
-            queueMessage.append(trackNumber++)
-                    .append(". **")
-                    .append(trackInfo.getTitle())
-                    .append("** - ")
-                    .append(trackInfo.getArtist())
-                    .append(" [")
-                    .append(trackInfo.getDuration())
-                    .append("]\n");
+        
+        if (musicManager != null) {
+            musicManager.getScheduler().showQueue(textChannel);
+        } else {
+            textChannel.sendMessage("Aucune file d'attente trouvée pour ce serveur.").queue();
         }
-    
-        event.getChannel().sendMessage(queueMessage.toString()).queue();
     }
-    
     
     
     private void handleCurrentCommand(MessageReceivedEvent event) {
@@ -393,86 +386,26 @@ public class Main extends ListenerAdapter {
 
     // Traite le chargement des informations YouTube et ajoute les informations de la piste dans la file d'attente
     private void handleYouTubeLoad(String youtubeUrl, MessageReceivedEvent event) {
-        try {
-            // Extraction du flux audio
-            ProcessBuilder urlBuilder = new ProcessBuilder(
-                "yt-dlp", "-f", "bestaudio[ext=webm][acodec=opus]", "--get-url", youtubeUrl
-            );
-            Process urlProcess = urlBuilder.start();
-            BufferedReader urlReader = new BufferedReader(new InputStreamReader(urlProcess.getInputStream()));
-            String streamUrl = urlReader.readLine();
-            int urlExitCode = urlProcess.waitFor();
+        String[] streamData = getYoutubeStreamUrlAndTitle(youtubeUrl);
     
-            if (urlExitCode != 0 || streamUrl == null) {
-                event.getChannel().sendMessage("Erreur : Impossible de récupérer le flux audio pour " + youtubeUrl).queue();
-                return;
-            }
-    
-            // Extraction des métadonnées
-            ProcessBuilder metadataBuilder = new ProcessBuilder(
-                "yt-dlp", "--print", "title", "--print", "uploader", "--print", "duration_string", "--print", "thumbnail", youtubeUrl
-            );
-            Process metadataProcess = metadataBuilder.start();
-            BufferedReader metadataReader = new BufferedReader(new InputStreamReader(metadataProcess.getInputStream()));
-    
-            String title = metadataReader.readLine();      // Titre de la vidéo
-            String uploader = metadataReader.readLine();   // Nom de l'uploader
-            String duration = metadataReader.readLine();   // Durée
-            String thumbnailUrl = metadataReader.readLine(); // URL de la miniature
-    
-            int metadataExitCode = metadataProcess.waitFor();
-            if (metadataExitCode != 0 || title == null || uploader == null || duration == null) {
-                event.getChannel().sendMessage("Erreur : Impossible de récupérer les métadonnées pour " + youtubeUrl).queue();
-                return;
-            }
-    
-            // Création d'un objet TrackInfo pour stocker les métadonnées
-            TrackInfo trackInfo = new TrackInfo(
-                title,
-                duration,
-                uploader,
-                thumbnailUrl,
-                youtubeUrl
-            );
-    
-            // Chargement de la piste dans Lavaplayer
-            loadTrackFromStreamUrl(streamUrl, trackInfo, event);
-    
-        } catch (IOException | InterruptedException e) {
-            event.getChannel().sendMessage("Erreur avec yt-dlp : " + e.getMessage()).queue();
-            e.printStackTrace();
+        if (streamData == null || streamData.length < 1 || streamData[0] == null) {
+            event.getChannel().sendMessage("Erreur lors de la récupération du flux audio avec yt-dlp.").queue();
+            return;
         }
+    
+        String streamUrl = streamData[0];
+        String videoId = extractYoutubeVideoId(youtubeUrl);
+        TrackInfo videoInfo = getYoutubeVideoInfo(videoId);
+    
+        if (videoInfo == null) {
+            videoInfo = new TrackInfo("Titre inconnu", "Durée inconnue", "Artiste inconnu", "https://via.placeholder.com/150", youtubeUrl);
+        }
+    
+        handleAudioLoadResult(streamUrl, videoInfo, event);
     }
     
     
-    private void loadTrackFromStreamUrl(String streamUrl, TrackInfo trackInfo, MessageReceivedEvent event) {
-        playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
-            @Override
-            public void trackLoaded(AudioTrack track) {
-                track.setUserData(trackInfo); // Associer les métadonnées à la piste
-                event.getChannel().sendMessage("Ajouté à la file d'attente : **" + trackInfo.getTitle() + "**").queue();
-    
-                MusicManager musicManager = botMusicService.getMusicManager(event.getGuild(), event.getChannel().asTextChannel(), event.getJDA());
-                musicManager.getScheduler().queueTrack(track);
-            }
-    
-            @Override
-            public void playlistLoaded(AudioPlaylist playlist) {
-                event.getChannel().sendMessage("Erreur : Une playlist n'est pas attendue ici.").queue();
-            }
-    
-            @Override
-            public void noMatches() {
-                event.getChannel().sendMessage("Aucune piste trouvée pour le lien donné.").queue();
-            }
-    
-            @Override
-            public void loadFailed(FriendlyException exception) {
-                event.getChannel().sendMessage("Erreur lors du chargement de la piste : " + exception.getMessage()).queue();
-            }
-        });
-    }
-    
+
     // Gère le chargement d'une piste audio dans le gestionnaire de musique
     private void handleAudioLoadResult(String streamUrl, TrackInfo trackInfo, MessageReceivedEvent event) {
         if (streamUrl == null) {
