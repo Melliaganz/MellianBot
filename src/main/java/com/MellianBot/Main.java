@@ -99,6 +99,9 @@ public class Main extends ListenerAdapter {
     }
     
     
+    private void logDebug(String message) {
+        System.out.println("[DEBUG] " + message);
+    }
     
 
     // Initialise le gestionnaire de source pour Spotify
@@ -257,17 +260,30 @@ public class Main extends ListenerAdapter {
         playerManager.loadItem(playlistUrl, new AudioLoadResultHandler() {
             @Override
             public void trackLoaded(AudioTrack track) {
-                // Ne devrait pas arriver pour une playlist
+                // Cela ne devrait pas arriver pour une playlist
             }
     
             @Override
             public void playlistLoaded(AudioPlaylist playlist) {
+                int totalTracks = playlist.getTracks().size();
                 event.getChannel().sendMessage("Playlist détectée : **" + playlist.getName() + "**. Ajout de " +
-                        playlist.getTracks().size() + " pistes à la file d'attente.").queue();
+                        totalTracks + " pistes à la file d'attente.").queue();
+    
+                int successCount = 0;
+                int errorCount = 0;
     
                 for (AudioTrack track : playlist.getTracks()) {
-                    musicManager.getScheduler().queueTrack(track);
+                    try {
+                        musicManager.getScheduler().queueTrack(track);
+                        successCount++;
+                    } catch (FriendlyException e) {
+                        System.err.println("Erreur lors du chargement de la piste : " + track.getInfo().title);
+                        errorCount++;
+                    }
                 }
+    
+                event.getChannel().sendMessage("Ajout terminé : **" + successCount + " pistes ajoutées**, **" +
+                        errorCount + " pistes échouées**.").queue();
             }
     
             @Override
@@ -465,30 +481,35 @@ public class Main extends ListenerAdapter {
 
     // Gère le chargement d'une piste audio dans le gestionnaire de musique
     private void handleAudioLoadResult(String streamUrl, TrackInfo trackInfo, MessageReceivedEvent event) {
+        if (streamUrl == null) {
+            event.getChannel().sendMessage("Erreur : Impossible de charger le flux audio.").queue();
+            return;
+        }
+    
         Guild guild = event.getGuild();
         TextChannel textChannel = event.getChannel().asTextChannel();
         JDA jda = event.getJDA();
-        MusicManager musicManager = botMusicService.getMusicManager(guild, textChannel, jda); // Récupère le bon MusicManager
-        
+        MusicManager musicManager = botMusicService.getMusicManager(guild, textChannel, jda);
+    
         playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
             @Override
             public void trackLoaded(AudioTrack track) {
                 track.setUserData(trackInfo);
-                event.getChannel().sendMessage("Ajouté à la file d'attente : " + trackInfo.getTitle()).queue();
-                musicManager.getScheduler().queueTrack(track); // Utilise le bon MusicManager ici
+                event.getChannel().sendMessage("Ajouté à la file d'attente : **" + trackInfo.getTitle() + "**").queue();
+                musicManager.getScheduler().queueTrack(track);
             }
     
             @Override
             public void playlistLoaded(AudioPlaylist playlist) {
-                event.getChannel().sendMessage("Playlist détectée. Ajout de " + playlist.getTracks().size() + " pistes à la file d'attente.").queue();
+                event.getChannel().sendMessage("Playlist détectée. Ajout de **" + playlist.getTracks().size() + " pistes**.").queue();
                 for (AudioTrack track : playlist.getTracks()) {
-                    musicManager.getScheduler().queueTrack(track); // Utilise le bon MusicManager ici
+                    musicManager.getScheduler().queueTrack(track);
                 }
             }
     
             @Override
             public void noMatches() {
-                event.getChannel().sendMessage("Aucune piste trouvée.").queue();
+                event.getChannel().sendMessage("Aucune piste trouvée pour le lien donné.").queue();
             }
     
             @Override
@@ -523,48 +544,34 @@ public class Main extends ListenerAdapter {
     }
 
     // Utilise yt-dlp pour obtenir le flux audio, le titre, la durée, et la miniature de la vidéo YouTube
-private String[] getYoutubeStreamUrlAndTitle(String videoUrl) {
-    try {
-        // Extraire l'URL du flux audio
-        ProcessBuilder urlBuilder = new ProcessBuilder("yt-dlp", "-f", "bestaudio", "--get-url", "--geo-bypass", videoUrl);
-        Process urlProcess = urlBuilder.start();
-        BufferedReader urlReader = new BufferedReader(new InputStreamReader(urlProcess.getInputStream()));
-        String streamUrl = urlReader.readLine();
-        System.out.println("URL du flux audio obtenue : " + streamUrl);
-
-        int urlExitCode = urlProcess.waitFor();
-        if (urlExitCode != 0 || streamUrl == null) {
-            BufferedReader errorReader = new BufferedReader(new InputStreamReader(urlProcess.getErrorStream()));
-            StringBuilder errorOutput = new StringBuilder();
-            String line;
-            while ((line = errorReader.readLine()) != null) {
-                errorOutput.append(line).append("\n");
+    private String[] getYoutubeStreamUrlAndTitle(String videoUrl) {
+        try {
+            // Extraction via yt-dlp
+            ProcessBuilder urlBuilder = new ProcessBuilder("yt-dlp", "-f", "bestaudio", "--get-url", "--geo-bypass", videoUrl);
+            Process urlProcess = urlBuilder.start();
+            BufferedReader urlReader = new BufferedReader(new InputStreamReader(urlProcess.getInputStream()));
+            String streamUrl = urlReader.readLine();
+    
+            int urlExitCode = urlProcess.waitFor();
+            if (urlExitCode != 0 || streamUrl == null) {
+                System.err.println("yt-dlp n'a pas pu traiter la vidéo : " + videoUrl);
+                return null;
             }
-            System.err.println("Erreur yt-dlp : " + errorOutput);
+    
+            // Extraire les informations de la vidéo (titre, durée, miniature)
+            String videoId = extractYoutubeVideoId(videoUrl);
+            if (videoId != null) {
+                TrackInfo videoInfo = getYoutubeVideoInfo(videoId);
+                return new String[]{streamUrl, videoInfo.getTitle(), videoInfo.getThumbnailUrl(), videoInfo.getDuration()};
+            }
+    
+            return new String[]{streamUrl, "Titre inconnu", "https://via.placeholder.com/150", "Durée inconnue"};
+        } catch (IOException | InterruptedException e) {
+            e.printStackTrace();
             return null;
         }
-
-        // Extraire l'ID de la vidéo
-        String videoId = extractYoutubeVideoId(videoUrl);
-        if (videoId == null) {
-            System.err.println("Impossible d'extraire l'ID de la vidéo.");
-            return new String[]{streamUrl, "Titre inconnu", "https://via.placeholder.com/150", "Durée inconnue"};
-        }
-
-        // Récupérer les informations de la vidéo via l'API YouTube
-        TrackInfo videoInfo = getYoutubeVideoInfo(videoId);
-
-        return new String[]{
-            streamUrl,
-            videoInfo.getTitle(),
-            videoInfo.getThumbnailUrl(),
-            videoInfo.getDuration()
-        };
-    } catch (IOException | InterruptedException e) {
-        e.printStackTrace();
     }
-    return null;
-}
+    
 
 // Méthode pour extraire l'ID de la vidéo
 private String extractYoutubeVideoId(String url) {
