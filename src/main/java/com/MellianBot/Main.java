@@ -228,61 +228,29 @@ public class Main extends ListenerAdapter {
     }
     private void handleYouTubePlaylist(String playlistUrl, MessageReceivedEvent event, MusicManager musicManager) {
         try {
+            // Commande pour extraire tous les IDs des vidéos de la playlist
             ProcessBuilder processBuilder = new ProcessBuilder(
                 "yt-dlp", "--flat-playlist", "--get-id", "--no-check-certificate", playlistUrl
             );
             Process process = processBuilder.start();
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
     
-            int trackCount = 0; // Compteur de pistes ajoutées
             String videoId;
             while ((videoId = reader.readLine()) != null) {
                 String videoUrl = "https://www.youtube.com/watch?v=" + videoId;
-                handleYouTubeLoadWithoutMessage(videoUrl, musicManager); // Ajoute la piste sans afficher de message
-                trackCount++;
+                handleYouTubeLoad(videoUrl, event);
             }
     
             int exitCode = process.waitFor();
-            if (exitCode == 0) {
-                event.getChannel().sendMessage("🎶 Playlist chargée avec succès ! **" + trackCount + "** pistes ajoutées à la file d'attente.").queue();
-            } else {
+            if (exitCode != 0) {
                 event.getChannel().sendMessage("Erreur lors du chargement de la playlist.").queue();
+            } else {
+                event.getChannel().sendMessage("Playlist chargée avec succès !").queue();
             }
         } catch (IOException | InterruptedException e) {
             event.getChannel().sendMessage("Erreur pendant le chargement de la playlist : " + e.getMessage()).queue();
             e.printStackTrace();
         }
-    }
-    
-    private void handleYouTubeLoadWithoutMessage(String youtubeUrl, MusicManager musicManager) {
-        String[] streamData = getYoutubeStreamUrlAndTitle(youtubeUrl);
-    
-        if (streamData == null || streamData.length < 1 || streamData[0] == null) {
-            return; // Pas de flux valide
-        }
-    
-        String streamUrl = streamData[0];
-        playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
-            @Override
-            public void trackLoaded(AudioTrack track) {
-                musicManager.getScheduler().queueTrack(track);
-            }
-    
-            @Override
-            public void playlistLoaded(AudioPlaylist playlist) {
-                // Ignorer les playlists ici
-            }
-    
-            @Override
-            public void noMatches() {
-                // Ignorer les erreurs pour les pistes introuvables
-            }
-    
-            @Override
-            public void loadFailed(FriendlyException exception) {
-                // Ignorer les erreurs
-            }
-        });
     }
     
     // Obtient le canal vocal de l'utilisateur qui a envoyé la commande
@@ -400,21 +368,25 @@ public class Main extends ListenerAdapter {
     }
 
     private void handleHelpCommand(MessageReceivedEvent event) {
-        String helpMessage = "Commandes disponibles :\n" +
-                "!play <lien ou mots-clés> : Joue la musique demandée.\n" +
-                "!current : affiche les infos de la piste en cours." +
-                "!loop : Permet de jouer en boucle la track en cours." +
-                "!pause : Met la lecture en pause.\n" +
-                "!resume : Reprend la lecture.\n" +
-                "!skip : Saute la piste en cours.\n" +
-                "!first : Permet de placer une track en premier de la file d'attente.\n"+
-                "!stop : Arrête la lecture et vide la file d'attente.\n" +
-                "!clear : Vide la file d'attente sans arrêter la piste en cours.\n" +
-                "!queue : Affiche les pistes présentes dans la file d'attente.\n" +
-                "!current : Affiche la piste en cours de lecture.\n" +
-                "!help : Affiche toutes les commandes.";
+        String helpMessage = "```md\n" +
+                "# Commandes disponibles :\n" +
+                "### Musique :\n" +
+                "- [!play <lien ou mots-clés>] : Joue la musique demandée.\n" +
+                "- [!pause] : Met la lecture en pause.\n" +
+                "- [!resume] : Reprend la lecture.\n" +
+                "- [!skip] : Saute la piste en cours.\n" +
+                "- [!stop] : Arrête la lecture et vide la file d'attente.\n" +
+                "- [!clear] : Vide la file d'attente sans arrêter la piste en cours.\n" +
+                "- [!queue] : Affiche les pistes présentes dans la file d'attente.\n" +
+                "- [!current] : Affiche la piste en cours de lecture.\n" +
+                "- [!loop] : Active ou désactive la lecture en boucle de la piste en cours.\n\n" +
+                "### Général :\n" +
+                "- [!help] : Affiche toutes les commandes.\n" +
+                "```\n";
+    
         event.getChannel().sendMessage(helpMessage).queue();
     }
+    
 
     // Traite le chargement des informations YouTube et ajoute les informations de la piste dans la file d'attente
     private void handleYouTubeLoad(String youtubeUrl, MessageReceivedEvent event) {
@@ -433,10 +405,9 @@ public class Main extends ListenerAdapter {
             videoInfo = new TrackInfo("Titre inconnu", "Durée inconnue", "Artiste inconnu", "https://via.placeholder.com/150", youtubeUrl);
         }
     
-        displayTrackInfo(videoInfo, event); // Affiche les informations sur la piste
+        displayTrackInfo(videoInfo, event); // Display detailed track information
         handleAudioLoadResult(streamUrl, videoInfo, event);
     }
-    
     private void displayTrackInfo(TrackInfo trackInfo, MessageReceivedEvent event) {
         String message = "**🎵 Now Playing:**\n" +
                          "**Titre:** " + trackInfo.getTitle() + "\n" +
