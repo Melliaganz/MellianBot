@@ -228,29 +228,61 @@ public class Main extends ListenerAdapter {
     }
     private void handleYouTubePlaylist(String playlistUrl, MessageReceivedEvent event, MusicManager musicManager) {
         try {
-            // Commande pour extraire tous les IDs des vidéos de la playlist
             ProcessBuilder processBuilder = new ProcessBuilder(
                 "yt-dlp", "--flat-playlist", "--get-id", "--no-check-certificate", playlistUrl
             );
             Process process = processBuilder.start();
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
     
+            int trackCount = 0; // Compteur de pistes ajoutées
             String videoId;
             while ((videoId = reader.readLine()) != null) {
                 String videoUrl = "https://www.youtube.com/watch?v=" + videoId;
-                handleYouTubeLoad(videoUrl, event);
+                handleYouTubeLoadWithoutMessage(videoUrl, musicManager); // Ajoute la piste sans afficher de message
+                trackCount++;
             }
     
             int exitCode = process.waitFor();
-            if (exitCode != 0) {
-                event.getChannel().sendMessage("Erreur lors du chargement de la playlist.").queue();
+            if (exitCode == 0) {
+                event.getChannel().sendMessage("🎶 Playlist chargée avec succès ! **" + trackCount + "** pistes ajoutées à la file d'attente.").queue();
             } else {
-                event.getChannel().sendMessage("Playlist chargée avec succès !").queue();
+                event.getChannel().sendMessage("Erreur lors du chargement de la playlist.").queue();
             }
         } catch (IOException | InterruptedException e) {
             event.getChannel().sendMessage("Erreur pendant le chargement de la playlist : " + e.getMessage()).queue();
             e.printStackTrace();
         }
+    }
+    
+    private void handleYouTubeLoadWithoutMessage(String youtubeUrl, MusicManager musicManager) {
+        String[] streamData = getYoutubeStreamUrlAndTitle(youtubeUrl);
+    
+        if (streamData == null || streamData.length < 1 || streamData[0] == null) {
+            return; // Pas de flux valide
+        }
+    
+        String streamUrl = streamData[0];
+        playerManager.loadItem(streamUrl, new AudioLoadResultHandler() {
+            @Override
+            public void trackLoaded(AudioTrack track) {
+                musicManager.getScheduler().queueTrack(track);
+            }
+    
+            @Override
+            public void playlistLoaded(AudioPlaylist playlist) {
+                // Ignorer les playlists ici
+            }
+    
+            @Override
+            public void noMatches() {
+                // Ignorer les erreurs pour les pistes introuvables
+            }
+    
+            @Override
+            public void loadFailed(FriendlyException exception) {
+                // Ignorer les erreurs
+            }
+        });
     }
     
     // Obtient le canal vocal de l'utilisateur qui a envoyé la commande
@@ -375,7 +407,7 @@ public class Main extends ListenerAdapter {
                 "!pause : Met la lecture en pause.\n" +
                 "!resume : Reprend la lecture.\n" +
                 "!skip : Saute la piste en cours.\n" +
-                "!first : Permet de placer une track en premier de la file d'attente." +
+                "!first : Permet de placer une track en premier de la file d'attente.\n"+
                 "!stop : Arrête la lecture et vide la file d'attente.\n" +
                 "!clear : Vide la file d'attente sans arrêter la piste en cours.\n" +
                 "!queue : Affiche les pistes présentes dans la file d'attente.\n" +
@@ -401,9 +433,10 @@ public class Main extends ListenerAdapter {
             videoInfo = new TrackInfo("Titre inconnu", "Durée inconnue", "Artiste inconnu", "https://via.placeholder.com/150", youtubeUrl);
         }
     
-        displayTrackInfo(videoInfo, event); // Display detailed track information
+        displayTrackInfo(videoInfo, event); // Affiche les informations sur la piste
         handleAudioLoadResult(streamUrl, videoInfo, event);
     }
+    
     private void displayTrackInfo(TrackInfo trackInfo, MessageReceivedEvent event) {
         String message = "**🎵 Now Playing:**\n" +
                          "**Titre:** " + trackInfo.getTitle() + "\n" +
